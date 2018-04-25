@@ -180,11 +180,61 @@ router.post('/upload', function (req, res, next) {
                 });
             }
             console.log("success")
-            res.status(200).json({
-                "status": 200,
-                "id": post.id,
-                "created date:": post.created_at
+            var request = require('request');
+            var message = "Dear "+req.body.firstName+" Welcome to Serans. Your Application is under process. Will revert within 24 hours"
+            request('http://bulksms.mysmsmantra.com:8080/WebSMS/SMSAPI.jsp?username=serans&password=1312733985&sendername=SERANS&mobileno=91'+ req.body.mobile+'&message='+message, function (error, response, body) {
+                if (!error && response.statusCode == 200) {
+                    console.log(body) // Print the google web page.
+                }
+            })
+            var email = require('emailjs');
+            var emailMessage = '<div class="pre"><span style="white-space:nowrap">Dear&nbsp;'+ req.body.firstName+',</span><br>' +
+                '&nbsp;&nbsp;&nbsp;&nbsp;Welcome to the Serans Portal. We thank you for choosing us as your preferred Internet service provider,Your Application has been Registered Successfully.<br>' +
+                'Please remember the information in the application will need to access your account for requesting and managing your account and has to produce copies of the documents for the internet connection.<br>' +
+                '(a) Proof of address (Any one of the following): Applicant’s ration card, certificate from Employer of reputed companies on letter head, water /telephone /electricity bill/statement of running bank account/Income Tax Assessment Order /Election Commission ID card. (NOTE: If any applicant submits only ration card as proof of address, it should be accompanied by one more proof of address out of the above categories).<br>' +
+                '(b) ID Proof (Any one of the following): Voter Id, Pan Card or Aadhar Card.<br>' +
+                '<span style="white-space:nowrap">(C)&nbsp;Passport&nbsp;size&nbsp;–&nbsp;2&nbsp;Photo.</span><br>' +
+                '<span style="white-space:nowrap">Our&nbsp;customer&nbsp;care&nbsp;executive&nbsp;will&nbsp;contact&nbsp;you&nbsp;soon.</span><br>' +
+                'We look forward to supporting you through as a Best Internet Service Provider.<br>' +
+                '<span style="white-space:nowrap">Warm&nbsp;regards,</span><br>' +
+                '<span style="white-space:nowrap">Customer&nbsp;Care&nbsp;Service,</span><br>' +
+                '<span style="white-space:nowrap">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Serans.</span><br>' +
+                '<span style="white-space:nowrap">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<a rel="noreferrer" target="_blank" href="http://www.serans.co.in">www.serans.co.in</a></span><br>' +
+                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Note: We wish to inform you that Requested Connection may be according to Subject to availability in your Area.<br>' +
+                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;……..This is an auto generated mail; please do not reply to this mail………………..<br>' +
+                '</div>';
+            var server = email.server.connect({
+                user: 'noreply@serans.co.in',
+                password: 'serans@12345',
+                host: 'mail.serans.co.in',
+                port: 25,
+                ssl: false
             });
+
+            server.send({
+                text: emailMessage,
+                from: 'Serans <noreply@serans.co.in>',
+                to: req.body.email,
+                cc: 'seransisp@gmail.com',
+                subject: 'Greetings',
+                attachment:
+                [
+                    { data: emailMessage, alternative: true },
+                ]
+            }, function (err, message) {
+                console.log(err || message);
+                if (err) return res.status(404).json({
+                    "status": 404,
+                    "data": err
+                });
+                res.status(200).json({
+                    "status": 200,
+                    "id": post.id,
+                    "created date:": post.created_at
+                });
+
+            });
+
         });
     }
 
@@ -360,7 +410,7 @@ router.post('/login', function (req, res, next) {
     var token
     require('crypto').randomBytes(48, function (err, buffer) {
         token = buffer.toString('hex');
-console.log(token)
+        console.log(token)
         userList.find({ 'email': email }, function (err, user) {
             // console.log(err);
             console.log(user)
@@ -409,4 +459,38 @@ console.log(token)
     // });
 });
 
+router.post('/email', function (req, res, next) {
+    var email = require('emailjs');
+    var emailMessage = 'hi';
+    var server = email.server.connect({
+        user: 'ponnarasan@serans.co.in',
+        password: 'serans@12345',
+        host: 'mail.serans.co.in',
+        port: 25,
+        ssl: false,
+    });
+
+    server.send({
+        text: emailMessage,
+        from: 'Serans <ponnarasan@serans.co.in>',
+        to: 'ponnarasan@serans.co.in',
+        cc: 'seransisp@gmail.com',
+        subject: 'Greetings',
+        attachment:
+            [
+                { data: emailMessage, alternative: true },
+            ]
+}, function (err, message) {
+    console.log(err || message);
+    if (err) return res.status(404).json({
+        "status": 404,
+        "data": err
+    });
+    res.status(200).json({
+        "status": 200,
+
+    });
+
+});
+});
 module.exports = router;
