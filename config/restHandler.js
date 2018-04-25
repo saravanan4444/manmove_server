@@ -179,16 +179,23 @@ router.post('/upload', function (req, res, next) {
                     "data": err
                 });
             }
+            var name;
+            if (req.body.gender == "f") {
+                name = "Ms. " + req.body.firstName
+            } else {
+                name = "Mr. " + req.body.firstName
+
+            }
             console.log("success")
             var request = require('request');
-            var message = "Dear "+req.body.firstName+" Welcome to Serans. Your Application is under process. Will revert within 24 hours"
-            request('http://bulksms.mysmsmantra.com:8080/WebSMS/SMSAPI.jsp?username=serans&password=1312733985&sendername=SERANS&mobileno=91'+ req.body.mobile+'&message='+message, function (error, response, body) {
+            var message = "Dear " + name + " Welcome to Serans. Your Application is under process. Will revert within 24 hours"
+            request('http://bulksms.mysmsmantra.com:8080/WebSMS/SMSAPI.jsp?username=serans&password=1312733985&sendername=SERANS&mobileno=91' + req.body.mobile + '&message=' + message, function (error, response, body) {
                 if (!error && response.statusCode == 200) {
                     console.log(body) // Print the google web page.
                 }
             })
             var email = require('emailjs');
-            var emailMessage = '<div class="pre"><span style="white-space:nowrap">Dear&nbsp;'+ req.body.firstName+',</span><br>' +
+            var emailMessage = '<div class="pre"><span style="white-space:nowrap">Dear&nbsp;' + name + ',</span><br>' +
                 '&nbsp;&nbsp;&nbsp;&nbsp;Welcome to the Serans Portal. We thank you for choosing us as your preferred Internet service provider,Your Application has been Registered Successfully.<br>' +
                 'Please remember the information in the application will need to access your account for requesting and managing your account and has to produce copies of the documents for the internet connection.<br>' +
                 '(a) Proof of address (Any one of the following): Applicant’s ration card, certificate from Employer of reputed companies on letter head, water /telephone /electricity bill/statement of running bank account/Income Tax Assessment Order /Election Commission ID card. (NOTE: If any applicant submits only ration card as proof of address, it should be accompanied by one more proof of address out of the above categories).<br>' +
@@ -218,9 +225,9 @@ router.post('/upload', function (req, res, next) {
                 cc: 'seransisp@gmail.com',
                 subject: 'Greetings',
                 attachment:
-                [
-                    { data: emailMessage, alternative: true },
-                ]
+                    [
+                        { data: emailMessage, alternative: true },
+                    ]
             }, function (err, message) {
                 console.log(err || message);
                 if (err) return res.status(404).json({
@@ -459,6 +466,75 @@ router.post('/login', function (req, res, next) {
     // });
 });
 
+router.post('/forget', function (req, res, next) {
+    console.log(req.body)
+    var email = req.body.email;
+    var token
+
+    userList.find({ 'email': email }, function (err, user) {
+        // console.log(err);
+        console.log(user)
+        console.log(user.length)
+
+        if (err)
+            res.status(404).json({
+                "status": 500,
+                "message": err,
+            });
+        // if no user is found, return the message
+        else if (user.length == 0)
+            res.status(200).json({
+                "status": 500,
+                "message": "No user found",
+            });
+        // all is well, return successful user
+        else {
+            var email = require('emailjs');
+            var emailMessage = 'Your requested password for the email address ' + req.body.email + ' password is <div style="color:red">' + user[0].password + '</div>';
+            var server = email.server.connect({
+                user: 'noreply@serans.co.in',
+                password: 'serans@12345',
+                host: 'mail.serans.co.in',
+                port: 25,
+                ssl: false,
+            });
+
+            server.send({
+                text: emailMessage,
+                from: 'Serans <noreply@serans.co.in>',
+                to: req.body.email,
+                subject: 'Greetings',
+                attachment:
+                    [
+                        { data: emailMessage, alternative: true },
+                    ]
+            }, function (err, message) {
+                console.log(err || message);
+                if (err) return res.status(404).json({
+                    "status": 404,
+                    "data": err
+                });
+                res.status(200).json({
+                    "status": 200,
+                    "token": token,
+                    "message": "Successfully found in",
+                });
+            });
+        }
+
+    });
+
+    // if (err) return res.status(404).json({
+    //     "status": 404,
+    //     "data": err
+    // }); res.status(200).json({
+    //     "status": 200,
+    //     "id": user.id,
+    //     "updated date:": user.updated_at
+    // });
+    // });
+});
+
 router.post('/email', function (req, res, next) {
     var email = require('emailjs');
     var emailMessage = 'hi';
@@ -480,17 +556,17 @@ router.post('/email', function (req, res, next) {
             [
                 { data: emailMessage, alternative: true },
             ]
-}, function (err, message) {
-    console.log(err || message);
-    if (err) return res.status(404).json({
-        "status": 404,
-        "data": err
-    });
-    res.status(200).json({
-        "status": 200,
+    }, function (err, message) {
+        console.log(err || message);
+        if (err) return res.status(404).json({
+            "status": 404,
+            "data": err
+        });
+        res.status(200).json({
+            "status": 200,
+
+        });
 
     });
-
-});
 });
 module.exports = router;

@@ -3,6 +3,7 @@ var mongoose = require('mongoose');
 var DataSchema = new mongoose.Schema({
   firstName: String,
   userName: String,
+  gender:String,
   address: String,
   doorno:String,
   street:String,
