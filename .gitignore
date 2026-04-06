@@ -1,29 +1,50 @@
-# Specifies intentionally untracked files to ignore when using Git
-# http://git-scm.com/docs/gitignore
-
-*~
-*.sw[mnpcod]
-*.log
-*.tmp
-*.tmp.*
-log.txt
-*.sublime-project
-*.sublime-workspace
-.vscode/
-npm-debug.log*
-
-.idea/
-.sourcemaps/
-.sass-cache/
-.tmp/
-.versions/
-coverage/
-dist/
+# =========================
+# Node.js Dependencies
+# =========================
 node_modules/
-tmp/
-temp/
-$RECYCLE.BIN/
 
+# =========================
+# Environment Variables (VERY IMPORTANT)
+# =========================
+.env
+
+# =========================
+# Logs & Debug Files
+# =========================
+*.log
+logs/
+
+# =========================
+# OS / System Files
+# =========================
 .DS_Store
+._.DS_Store
 Thumbs.db
-UserInterfaceState.xcuserstate
+
+# =========================
+# Archives / Backups
+# =========================
+*.zip
+
+# =========================
+# Uploads (ignore if user-generated)
+# =========================
+uploads/
+
+# =========================
+# Seed / Utility Scripts (optional)
+# =========================
+seed-*.js
+audit-roles.js
+check-dashboard.js
+
+# =========================
+# Development-only configs
+# =========================
+nodemon.json
+
+# =========================
+# Test & Coverage
+# =========================
+tests/
+coverage/

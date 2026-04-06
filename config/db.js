@@ -1,16 +1,32 @@
-var mongoose = require('mongoose');
-function openConnection(){
+require('dotenv').config();
+const mongoose = require('mongoose');
+const logger   = require('./logger');
 
-//Set up default mongoose connection
-var mongoDB = 'mongodb://127.0.0.1/my_database';
-mongoose.connect(mongoDB);
-// Get Mongoose to use the global promise library
-mongoose.Promise = global.Promise;
-//Get the default connection
-var db = mongoose.connection;
+mongoose.set('strictQuery', true);
 
-//Bind connection to error event (to get notification of connection errors)
-db.on('error', console.error.bind(console, 'MongoDB connection error:'));
-db.on('open', function(){console.log('DB connection sucessfull >>')});
+const MONGO_OPTS = {
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+    maxPoolSize: 10,
+};
+
+async function connect() {
+    try {
+        await mongoose.connect(process.env.MONGO_URL, MONGO_OPTS);
+        logger.info('MongoDB connected');
+    } catch (err) {
+        logger.error('MongoDB connection failed', { error: err.message });
+        setTimeout(connect, 5000);
+    }
 }
-module.exports=openConnection();
+
+mongoose.connection.on('disconnected', () => {
+    logger.warn('MongoDB disconnected — retrying in 5s');
+    setTimeout(connect, 5000);
+});
+
+mongoose.connection.on('error', err => logger.error('MongoDB error', { error: err.message }));
+
+connect();
+
+module.exports = mongoose.connection;

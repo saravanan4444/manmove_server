@@ -7,15 +7,12 @@ var PackageSchema = new mongoose.Schema({
   created_at: { type: Date },
   updated_at: { type: Date },
 });
-PackageSchema.pre('save', function (next) {
+PackageSchema.pre('save', function() {
   this.created_at = new Date();
-  console.log(this.created_at)
   
-  next();
-});
-PackageSchema.pre('findOneAndUpdate', function(next) {
+  });
+PackageSchema.pre('findOneAndUpdate', function() {
   this.updated_at = new Date();
-  console.log(this.updated_at)
-  next();
+  
 });
 module.exports = mongoose.model('Package', PackageSchema);

@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ManMove Server Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#080b0f;--card:#0f1318;--card2:#141920;--border:#1e2530;--accent:#00d4aa;--blue:#0099ff;--red:#ff4757;--yellow:#ffa502;--text:#e8edf2;--muted:#6b7a8d}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;font-family:inherit}
+
+/* Header */
+#header{position:fixed;top:0;left:0;right:0;height:60px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;z-index:100}
+#header .logo{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+#header .badge{background:var(--border);color:var(--muted);font-size:11px;padding:2px 8px;border-radius:20px}
+#header .spacer{flex:1}
+#header .clock{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+#header .status-dot{width:8px;height:8px;border-radius:50%;background:#2ed573;box-shadow:0 0 6px #2ed573}
+#header .btn-signout{background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:6px;font-size:13px;transition:all .2s}
+#header .btn-signout:hover{border-color:var(--red);color:var(--red)}
+
+/* Sidebar */
+#sidebar{position:fixed;top:60px;left:0;bottom:0;width:220px;background:var(--card);border-right:1px solid var(--border);padding:16px 0;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;font-size:14px;color:var(--muted);cursor:pointer;transition:all .15s;border-left:3px solid transparent}
+.nav-item:hover{color:var(--text);background:var(--card2)}
+.nav-item.active{color:var(--accent);background:rgba(0,212,170,.07);border-left-color:var(--accent)}
+.nav-item .icon{font-size:16px;width:20px;text-align:center}
+
+/* Main */
+#main{position:fixed;top:60px;left:220px;right:0;bottom:0;overflow-y:auto;padding:24px}
+
+/* Pages */
+.page{display:none}
+.page.active{display:block}
+
+/* Cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px}
+.card2{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:16px}
+
+/* Stat grid */
+.stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:20px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px}
+.stat-card .label{font-size:12px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+.stat-card .value{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat-card .value.green{color:#2ed573}
+.stat-card .value.accent{color:var(--accent)}
+.stat-card .value.blue{color:var(--blue)}
+.stat-card .value.red{color:var(--red)}
+
+/* Buttons */
+.btn{border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;gap:6px}
+.btn-accent{background:var(--accent);color:#000}
+.btn-accent:hover{opacity:.85}
+.btn-blue{background:var(--blue);color:#fff}
+.btn-blue:hover{opacity:.85}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn-red{background:transparent;border:1px solid var(--border);color:var(--muted)}
+.btn-red:hover{border-color:var(--red);color:var(--red)}
+
+/* Actions row */
+.actions-row{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+
+/* Log panel */
+.panel{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.panel-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600}
+.panel-body{padding:0;max-height:340px;overflow-y:auto}
+.log-entry{padding:10px 20px;border-bottom:1px solid rgba(30,37,48,.5);font-size:12px;font-family:'Courier New',monospace;color:var(--muted);display:flex;gap:12px}
+.log-entry:last-child{border-bottom:none}
+.log-entry .ts{color:var(--border);min-width:80px}
+.log-entry .msg{color:var(--text)}
+
+/* Charts */
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px}
+.chart-card h3{font-size:13px;color:var(--muted);margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px}
+.chart-card canvas{max-height:200px}
+
+/* DB */
+.db-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.ping-badge{background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;display:flex;align-items:center;gap:8px}
+.ping-dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.collection-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.col-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
+.col-card .col-name{font-size:12px;color:var(--muted);margin-bottom:6px}
+.col-card .col-count{font-size:24px;font-weight:700;color:var(--accent)}
+
+/* Routes */
+.search-input{background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:8px 14px;color:var(--text);font-size:13px;width:300px;outline:none;margin-bottom:16px}
+.search-input:focus{border-color:var(--accent)}
+.routes-table{width:100%;border-collapse:collapse}
+.routes-table th{text-align:left;padding:10px 16px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.routes-table td{padding:10px 16px;font-size:13px;border-bottom:1px solid rgba(30,37,48,.5)}
+.routes-table tr:last-child td{border-bottom:none}
+.method-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:.5px}
+.method-GET{background:rgba(0,212,170,.15);color:var(--accent)}
+.method-POST{background:rgba(0,153,255,.15);color:var(--blue)}
+.method-PUT{background:rgba(255,165,2,.15);color:var(--yellow)}
+.method-DELETE{background:rgba(255,71,87,.15);color:var(--red)}
+.method-PATCH{background:rgba(255,165,2,.15);color:var(--yellow)}
+
+/* Live logs */
+.live-badge{background:var(--red);color:#fff;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:700;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.log-table{width:100%;border-collapse:collapse}
+.log-table th{text-align:left;padding:10px 16px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.log-table td{padding:8px 16px;font-size:12px;border-bottom:1px solid rgba(30,37,48,.3);font-variant-numeric:tabular-nums}
+.status-2xx{color:#2ed573}
+.status-3xx{color:var(--yellow)}
+.status-4xx{color:var(--yellow)}
+.status-5xx{color:var(--red)}
+
+/* Errors */
+.error-card{background:rgba(255,71,87,.05);border:1px solid rgba(255,71,87,.2);border-radius:8px;padding:16px;margin-bottom:12px;display:flex;gap:14px;align-items:flex-start}
+.error-action{background:rgba(255,71,87,.15);color:var(--red);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap}
+.error-desc{font-size:13px;color:var(--text);flex:1}
+.error-ts{font-size:11px;color:var(--muted);white-space:nowrap}
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted);font-size:14px}
+
+/* Seed */
+.seed-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.seed-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:24px}
+.seed-card h3{font-size:15px;font-weight:600;margin-bottom:8px}
+.seed-card p{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6}
+.seed-result{margin-top:14px;padding:10px 14px;border-radius:6px;font-size:13px;display:none}
+.seed-result.success{background:rgba(0,212,170,.1);border:1px solid rgba(0,212,170,.3);color:var(--accent)}
+.seed-result.error{background:rgba(255,71,87,.1);border:1px solid rgba(255,71,87,.3);color:var(--red)}
+
+/* Toast */
+#toast-container{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+.toast{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 18px;font-size:13px;min-width:220px;animation:slideIn .2s ease;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.toast.success{border-color:rgba(0,212,170,.4);color:var(--accent)}
+.toast.error{border-color:rgba(255,71,87,.4);color:var(--red)}
+@keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* Login overlay */
+#login-overlay{position:fixed;inset:0;background:rgba(8,11,15,.97);display:flex;align-items:center;justify-content:center;z-index:1000}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;width:360px}
+.login-box h2{font-size:20px;font-weight:700;margin-bottom:6px}
+.login-box p{font-size:13px;color:var(--muted);margin-bottom:28px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.form-group input{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:14px;outline:none;font-family:inherit}
+.form-group input:focus{border-color:var(--accent)}
+.login-error{color:var(--red);font-size:13px;margin-bottom:14px;display:none}
+.btn-login{width:100%;background:var(--accent);color:#000;border:none;border-radius:6px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.btn-login:hover{opacity:.85}
+
+/* Spinner */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+/* Page title */
+.page-title{font-size:20px;font-weight:700;margin-bottom:20px}
+</style>
+</head>
+<body>
+
+<!-- Login Overlay -->
+<div id="login-overlay">
+  <div class="login-box">
+    <h2>⚡ ManMove Server</h2>
+    <p>Sign in to access the dashboard</p>
+    <div class="form-group">
+      <label>Username / Email</label>
+      <input type="text" id="login-user" placeholder="admin@manmove.com" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="login-pass" placeholder="••••••••" />
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button class="btn-login" onclick="doLogin()">Sign In</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <div class="logo">⚡ ManMove Server</div>
+  <span class="badge">v4.0</span>
+  <div class="spacer"></div>
+  <div class="clock" id="clock">--:--:--</div>
+  <span id="header-user" style="font-size:13px;color:var(--muted)"></span>
+  <div class="status-dot"></div>
+  <button class="btn-signout" onclick="logout()">Sign Out</button>
+</div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div class="nav-item active" onclick="showPage('overview',this)"><span class="icon">📊</span> Overview</div>
+  <div class="nav-item" id="nav-health" onclick="showPage('health',this)"><span class="icon">❤️</span> Health</div>
+  <div class="nav-item" onclick="showPage('performance',this)"><span class="icon">⚡</span> Performance</div>
+  <div class="nav-item" onclick="showPage('database',this)"><span class="icon">🗄️</span> Database</div>
+  <div class="nav-item" onclick="showPage('routes',this)"><span class="icon">🛣️</span> Routes</div>
+  <div class="nav-item" onclick="showPage('livelogs',this)"><span class="icon">📡</span> Live Logs</div>
+  <div class="nav-item" onclick="showPage('errors',this)"><span class="icon">🚨</span> Errors</div>
+  <div class="nav-item" onclick="showPage('seed',this)"><span class="icon">🌱</span> Seed Data</div>
+</div>
+
+<!-- Main Content -->
+<div id="main">
+
+  <!-- Page: Overview -->
+  <div class="page active" id="page-overview">
+    <div class="page-title">Overview</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Status</div><div class="value green" id="stat-status">Online</div></div>
+      <div class="stat-card"><div class="label">Uptime</div><div class="value accent" id="stat-uptime">00:00:00</div></div>
+      <div class="stat-card"><div class="label">Node Version</div><div class="value" id="stat-node">—</div></div>
+      <div class="stat-card"><div class="label">MongoDB</div><div class="value green" id="stat-mongo">—</div></div>
+      <div class="stat-card"><div class="label">RSS Memory</div><div class="value blue" id="stat-mem">—</div><div class="label" style="margin-top:4px">Process total (MB)</div></div>
+      <div class="stat-card"><div class="label">Heap Used / Total</div><div class="value blue" id="stat-heap">—</div><div class="label" style="margin-top:4px">JS heap (MB)</div></div>
+      <div class="stat-card"><div class="label">System RAM Free</div><div class="value green" id="stat-ramfree">—</div><div class="label" style="margin-top:4px" id="stat-ramtotal">of — GB total</div></div>
+      <div class="stat-card"><div class="label">CPU Load (1m avg)</div><div class="value" id="stat-cpu">—</div><div class="label" style="margin-top:4px" id="stat-cpucores">— cores</div></div>
+      <div class="stat-card"><div class="label">Total Requests</div><div class="value accent" id="stat-reqs">—</div></div>
+      <div class="stat-card"><div class="label">Total Errors</div><div class="value red" id="stat-errs">—</div></div>
+      <div class="stat-card"><div class="label">p95 Response Time</div><div class="value" id="stat-p95">—</div><div class="label" style="margin-top:4px">last 60s window</div></div>
+      <div class="stat-card"><div class="label">Error Rate</div><div class="value" id="stat-errrate">—</div><div class="label" style="margin-top:4px">last 60s window</div></div>
+    </div>
+    <div class="actions-row">
+      <a href="/api/docs" target="_blank"><button class="btn btn-accent">📄 API Docs</button></a>
+      <button class="btn btn-blue" onclick="showPage('health', document.getElementById('nav-health'))">❤️ Health</button>
+      <button class="btn btn-outline" onclick="refreshAll()">🔄 Refresh</button>
+      <button class="btn btn-red" onclick="clearLogs()">🗑️ Clear Logs</button>
+      <button class="btn btn-red" id="restart-btn" onclick="restartServer()" style="margin-left:auto">⚡ Restart Server</button>
+    </div>
+    <div id="restart-status-panel" style="display:none;margin:12px 0;padding:16px 20px;border-radius:10px;background:var(--card);border:1px solid var(--border);font-size:14px">
+      <div style="font-weight:600;margin-bottom:10px;color:var(--accent)">⚡ Server Restart Progress</div>
+      <div id="restart-steps"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">📋 System Activity Log</div>
+      <div class="panel-body" id="activity-log"><div style="padding:20px;color:var(--muted);font-size:13px">Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- Page: Health -->
+  <div class="page" id="page-health">
+    <div class="page-title">Health</div>
+    <!-- Overall status banner -->
+    <div id="health-banner" style="display:flex;align-items:center;gap:14px;padding:18px 24px;border-radius:10px;background:var(--card);border:1px solid var(--border);margin-bottom:20px">
+      <div id="health-dot" style="width:14px;height:14px;border-radius:50%;background:#2ed573;box-shadow:0 0 8px #2ed573;flex-shrink:0"></div>
+      <div>
+        <div id="health-title" style="font-size:16px;font-weight:700">All Systems Operational</div>
+        <div id="health-sub" style="font-size:12px;color:var(--muted);margin-top:2px">Loading...</div>
+      </div>
+      <button class="btn btn-outline" style="margin-left:auto;padding:6px 14px;font-size:12px" onclick="loadHealth()">🔄 Refresh</button>
+    </div>
+    <!-- Server info -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px" id="health-server-grid"></div>
+    <!-- Dependencies -->
+    <div class="panel" style="margin-bottom:20px">
+      <div class="panel-header">🔌 Dependencies</div>
+      <div id="health-deps" style="padding:16px;display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+    <!-- Memory -->
+    <div class="panel" style="margin-bottom:20px">
+      <div class="panel-header">💾 Memory</div>
+      <div id="health-memory" style="padding:16px;display:flex;flex-direction:column;gap:14px"></div>
+    </div>
+    <!-- Performance -->
+    <div class="panel">
+      <div class="panel-header">⚡ Performance <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">last 60s window</span></div>
+      <div id="health-perf" style="padding:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px"></div>
+    </div>
+  </div>
+
+  <!-- Page: Performance -->
+  <div class="page" id="page-performance">
+    <div class="page-title">Performance</div>
+    <div class="chart-grid">
+      <div class="chart-card"><h3>Memory Usage (MB)</h3><canvas id="chart-mem"></canvas></div>
+      <div class="chart-card"><h3>Response Time (ms)</h3><canvas id="chart-resp"></canvas></div>
+      <div class="chart-card" style="grid-column:1/-1"><h3>Request Count</h3><canvas id="chart-reqs"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Page: Database -->
+  <div class="page" id="page-database">
+    <div class="page-title">Database</div>
+    <div class="db-header">
+      <div class="ping-badge"><div class="ping-dot"></div> MongoDB Ping: <strong id="db-ping">—</strong></div>
+    </div>
+    <div class="stat-grid" style="margin-bottom:16px">
+      <div class="stat-card"><div class="label">Database</div><div class="value accent" id="db-name">—</div></div>
+      <div class="stat-card"><div class="label">Host</div><div class="value" id="db-host">—</div></div>
+      <div class="stat-card"><div class="label">Storage (MB)</div><div class="value blue" id="db-storage">—</div></div>
+      <div class="stat-card"><div class="label">Data Size (MB)</div><div class="value blue" id="db-data">—</div></div>
+      <div class="stat-card"><div class="label">Total Documents</div><div class="value accent" id="db-totaldocs">—</div></div>
+      <div class="stat-card"><div class="label">Connections (current)</div><div class="value" id="db-conns">—</div></div>
+      <div class="stat-card"><div class="label">Connections (available)</div><div class="value green" id="db-conns-avail">—</div></div>
+    </div>
+    <div class="collection-grid" id="collection-grid">
+      <div style="color:var(--muted);font-size:13px">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Page: Routes -->
+  <div class="page" id="page-routes">
+    <div class="page-title">Routes</div>
+    <input class="search-input" id="route-search" placeholder="🔍 Filter routes..." oninput="filterRoutes()" />
+    <div class="panel">
+      <div class="panel-body" style="max-height:calc(100vh - 220px)">
+        <table class="routes-table">
+          <thead><tr><th>Method</th><th>Path</th></tr></thead>
+          <tbody id="routes-tbody"><tr><td colspan="2" style="color:var(--muted);padding:20px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page: Live Logs -->
+  <div class="page" id="page-livelogs">
+    <div class="page-title">Live Logs</div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="live-badge">LIVE</span> Request Log
+        <div style="flex:1"></div>
+        <button class="btn btn-red" style="padding:4px 12px;font-size:12px" onclick="clearLiveLogs()">Clear</button>
+      </div>
+      <div class="panel-body" style="max-height:calc(100vh - 200px)">
+        <table class="log-table">
+          <thead><tr><th>Time</th><th>Method</th><th>Route</th><th>Status</th><th>Time (ms)</th></tr></thead>
+          <tbody id="live-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page: Errors -->
+  <div class="page" id="page-errors">
+    <div class="page-title">Errors</div>
+    <div id="errors-container"><div style="color:var(--muted);font-size:13px">Loading...</div></div>
+  </div>
+
+  <!-- Page: Seed Data -->
+  <div class="page" id="page-seed">
+    <div class="page-title">Seed Data</div>
+    <div class="seed-grid">
+      <div class="seed-card">
+        <h3>👤 Create Superadmin</h3>
+        <p>Creates the default superadmin account with full system access. Only run this once on a fresh installation.</p>
+        <button class="btn btn-accent" onclick="runSeed('superadmin')">Create Superadmin</button>
+        <div class="seed-result" id="seed-result-superadmin"></div>
+      </div>
+      <div class="seed-card">
+        <h3>🔐 Seed Default Roles</h3>
+        <p>Populates the database with the default role definitions required for the permission system to function correctly.</p>
+        <button class="btn btn-blue" onclick="runSeed('roles')">Seed Roles</button>
+        <div class="seed-result" id="seed-result-roles"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let token = localStorage.getItem('mm_token');
+let uptimeSeconds = 0;
+let uptimeInterval = null;
+let refreshInterval = null;
+let currentPage = 'overview';
+let allRoutes = [];
+let liveLogs = [];
+let charts = {};
+let socket = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────
+function init() {
+  if (!token) { document.getElementById('login-overlay').style.display = 'flex'; return; }
+  document.getElementById('login-overlay').style.display = 'none';
+  const userName = localStorage.getItem('mm_user_name');
+  if (userName) document.getElementById('header-user').textContent = '👤 ' + userName;
+  startClock();
+  startUptime();
+  connectSocket();
+  // restore last active page
+  const savedPage = localStorage.getItem('mm_page') || 'overview';
+  const navEl = document.querySelector(`.nav-item[onclick="showPage('${savedPage}',this)"]`);
+  if (navEl) showPage(savedPage, navEl);
+  else refreshAll();
+  refreshInterval = setInterval(refreshAll, 30000);
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if (!user || !pass) { errEl.textContent = 'Please enter username and password.'; errEl.style.display = 'block'; return; }
+  try {
+    const res = await fetch('/api/v1/adminlogin', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username: user, password: pass})
+    });
+    const data = await res.json();
+    // API always returns HTTP 200 — check the status field
+    if (data.status !== 200) throw new Error(data.message || 'Login failed');
+    token = data.token || data.data?.token || data.accessToken;
+    if (!token) throw new Error('No token in response');
+    // Decode name from JWT payload (no library needed)
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      localStorage.setItem('mm_user_name', payload.name || payload.email || 'Admin');
+    } catch(_) {}
+    localStorage.setItem('mm_token', token);
+    init();
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function logout() {
+  localStorage.removeItem('mm_token');
+  localStorage.removeItem('mm_user_name');
+  clearInterval(refreshInterval);
+  clearInterval(uptimeInterval);
+  location.reload();
+}
+
+// ── Clock & Uptime ─────────────────────────────────────────────────────────
+function startClock() {
+  function tick() {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toLocaleTimeString('en-GB');
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
+function startUptime() {
+  uptimeInterval = setInterval(() => {
+    uptimeSeconds++;
+    const h = String(Math.floor(uptimeSeconds / 3600)).padStart(2,'0');
+    const m = String(Math.floor((uptimeSeconds % 3600) / 60)).padStart(2,'0');
+    const s = String(uptimeSeconds % 60).padStart(2,'0');
+    document.getElementById('stat-uptime').textContent = `${h}:${m}:${s}`;
+  }, 1000);
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  el.classList.add('active');
+  currentPage = name;
+  localStorage.setItem('mm_page', name);
+  if (name === 'performance') loadPerformance();
+  else if (name === 'database') loadDatabase();
+  else if (name === 'routes') loadRoutes();
+  else if (name === 'errors') loadErrors();
+  else if (name === 'overview') loadOverview();
+  else if (name === 'health') loadHealth();
+  else if (name === 'livelogs') loadLiveLogs();
+}
+
+// ── API Helper ─────────────────────────────────────────────────────────────
+async function apiFetch(url) {
+  const res = await fetch(url, {headers: {'Authorization': 'Bearer ' + token}});
+  if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+  return res.json();
+}
+
+async function apiPost(url) {
+  const res = await fetch(url, {method:'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type':'application/json'}});
+  if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+  return res.json();
+}
+
+// ── Refresh All ────────────────────────────────────────────────────────────
+function refreshAll() {
+  loadOverview();
+  if (currentPage === 'performance') loadPerformance();
+  else if (currentPage === 'database') loadDatabase();
+  else if (currentPage === 'routes') loadRoutes();
+  else if (currentPage === 'errors') loadErrors();
+}
+
+// ── Overview ───────────────────────────────────────────────────────────────
+async function loadOverview() {
+  try {
+    const data = await apiFetch('/dashboard/stats');
+    const s = data.data || data;
+    document.getElementById('stat-node').textContent = s.nodeVersion || '—';
+    document.getElementById('stat-mongo').textContent = s.mongoStatus || 'Connected';
+    document.getElementById('stat-status').textContent = s.mongoStatus === 'connected' ? 'Online' : 'Degraded';
+    document.getElementById('stat-status').className = 'value ' + (s.mongoStatus === 'connected' ? 'green' : 'red');
+    document.getElementById('stat-mem').textContent = s.memoryMB ? s.memoryMB + ' MB' : '—';
+    document.getElementById('stat-heap').textContent = s.heapUsedMB && s.heapTotalMB ? s.heapUsedMB + ' / ' + s.heapTotalMB + ' MB' : '—';
+    // warn if heap > 80%
+    if (s.heapUsedMB && s.heapTotalMB) {
+      const pct = s.heapUsedMB / s.heapTotalMB;
+      document.getElementById('stat-heap').className = 'value ' + (pct > 0.8 ? 'red' : pct > 0.6 ? 'yellow' : 'blue');
+    }
+    document.getElementById('stat-ramfree').textContent = s.freeMemGB ? s.freeMemGB + ' GB' : '—';
+    document.getElementById('stat-ramtotal').textContent = s.totalMemGB ? 'of ' + s.totalMemGB + ' GB total' : '—';
+    document.getElementById('stat-cpu').textContent = s.cpuLoad !== undefined ? s.cpuLoad : '—';
+    document.getElementById('stat-cpucores').textContent = s.cpuCores ? s.cpuCores + ' cores' : '—';
+    document.getElementById('stat-reqs').textContent = s.totalRequests ?? '—';
+    document.getElementById('stat-errs').textContent = s.totalErrors ?? '—';
+    const p95El = document.getElementById('stat-p95');
+    p95El.textContent = s.p95ResponseMs !== undefined ? s.p95ResponseMs + ' ms' : '—';
+    p95El.className = 'value ' + (s.p95ResponseMs > 2000 ? 'red' : s.p95ResponseMs > 1000 ? 'yellow' : 'green');
+    const errRateEl = document.getElementById('stat-errrate');
+    errRateEl.textContent = s.errorRate !== undefined ? s.errorRate + '%' : '—';
+    errRateEl.className = 'value ' + (parseFloat(s.errorRate) > 5 ? 'red' : parseFloat(s.errorRate) > 1 ? 'yellow' : 'green');
+    if (s.uptime) { uptimeSeconds = s.uptime; }
+  } catch(e) { /* keep defaults */ }
+  loadActivityLog();
+}
+
+async function loadActivityLog() {
+  const el = document.getElementById('activity-log');
+  try {
+    const data = await apiFetch('/dashboard/logs');
+    const logs = (data.data || data).slice(0, 20);
+    if (!logs.length) { el.innerHTML = '<div class="log-entry"><span class="msg">No log entries.</span></div>'; return; }
+    const actionMeta = {
+      SERVER_STARTUP:            { icon: '🟢', color: '#22c55e' },
+      SERVER_RESTART:            { icon: '🔄', color: '#f59e0b' },
+      DASHBOARD_LOGS_CLEARED:    { icon: '🗑️', color: '#ef4444' },
+      DASHBOARD_SEED_SUPERADMIN: { icon: '👤', color: '#6366f1' },
+      DASHBOARD_SEED_ROLES:      { icon: '🔑', color: '#6366f1' },
+    };
+    el.innerHTML = logs.map(l => {
+      const ts  = l.created_at ? new Date(l.created_at).toLocaleString('en-GB') : '—';
+      const msg = l.description || l.action || JSON.stringify(l);
+      const meta = actionMeta[l.action] || { icon: '📋', color: 'var(--muted)' };
+      const who = l.user_name && l.user_name !== 'system' ? `<span style="color:var(--muted);font-size:11px;margin-left:6px">by ${escHtml(l.user_name)}</span>` : '';
+      const badge = `<span style="background:${meta.color}22;color:${meta.color};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap;margin-right:8px">${meta.icon} ${escHtml(l.action || '—')}</span>`;
+      return `<div class="log-entry" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="ts" style="min-width:130px">${ts}</span>
+        ${badge}
+        <span class="msg" style="flex:1">${escHtml(msg)}</span>
+        ${who}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="log-entry"><span class="msg" style="color:var(--red)">Failed to load logs.</span></div>';
+  }
+}
+
+async function showHealthCheck() {
+  try {
+    const res = await fetch('/health');
+    const d = await res.json();
+    const h = Math.floor(d.uptime / 3600);
+    const m = Math.floor((d.uptime % 3600) / 60);
+    const s = Math.floor(d.uptime % 60);
+    toast(`✅ Server OK — uptime ${h}h ${m}m ${s}s`, 'success');
+  } catch { toast('❌ Server not responding', 'error'); }
+}
+
+async function loadHealth() {
+  try {
+    const data = await apiFetch('/dashboard/health');
+    const h = data.data || data;
+    // Banner
+    const ok = h.status === 'ok';
+    document.getElementById('health-dot').style.cssText = ok
+      ? 'width:14px;height:14px;border-radius:50%;background:#2ed573;box-shadow:0 0 8px #2ed573;flex-shrink:0'
+      : 'width:14px;height:14px;border-radius:50%;background:#ff4757;box-shadow:0 0 8px #ff4757;flex-shrink:0';
+    document.getElementById('health-title').textContent = ok ? 'All Systems Operational' : '⚠️ System Degraded';
+    const up = h.uptime || 0;
+    document.getElementById('health-sub').textContent =
+      `Uptime: ${Math.floor(up/3600)}h ${Math.floor((up%3600)/60)}m ${up%60}s  •  ${h.hostname || ''}  •  ${new Date().toLocaleString('en-GB')}`;
+    // Server grid
+    document.getElementById('health-server-grid').innerHTML = [
+      ['Environment', h.env || '—', h.env === 'production' ? 'accent' : 'yellow'],
+      ['Node Version', h.nodeVersion || '—', ''],
+      ['PID', h.pid || '—', 'muted'],
+      ['Hostname', h.hostname || '—', ''],
+    ].map(([label, val, cls]) => `
+      <div class="card2">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${label}</div>
+        <div style="font-size:16px;font-weight:700;color:${cls === 'accent' ? 'var(--accent)' : cls === 'yellow' ? 'var(--yellow)' : cls === 'muted' ? 'var(--muted)' : 'var(--text)'}">${escHtml(String(val))}</div>
+      </div>`).join('');
+    // Dependencies
+    const deps = h.checks || {};
+    document.getElementById('health-deps').innerHTML = Object.entries(deps).map(([name, d]) => {
+      const ok2 = d.status === 'connected' || d.status === 'configured';
+      const color = ok2 ? '#2ed573' : d.status === 'not configured' ? 'var(--muted)' : '#ff4757';
+      const icon  = ok2 ? '●' : d.status === 'not configured' ? '○' : '●';
+      const extra = d.pingMs !== null && d.pingMs !== undefined ? `<span style="color:var(--muted);font-size:12px;margin-left:8px">ping: ${d.pingMs}ms</span>` : '';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--card2);border-radius:8px">
+        <span style="color:${color};font-size:18px">${icon}</span>
+        <span style="font-weight:600;text-transform:capitalize">${name}</span>
+        <span style="color:${color};font-size:13px">${d.status}</span>${extra}
+      </div>`;
+    }).join('');
+    // Memory bars
+    const mem = h.memory || {};
+    function bar(pct, color) {
+      const c = pct > 80 ? '#ff4757' : pct > 60 ? '#ffa502' : color;
+      return `<div style="background:var(--border);border-radius:4px;height:8px;flex:1">
+        <div style="width:${Math.min(pct,100)}%;background:${c};height:8px;border-radius:4px;transition:width .4s"></div></div>`;
+    }
+    document.getElementById('health-memory').innerHTML = [
+      ['RSS (Process)', mem.rssMB + ' MB', mem.rssPct, '#0099ff'],
+      ['Heap Used / Total', `${mem.heapUsedMB} / ${mem.heapTotalMB} MB`, mem.heapPct, '#00d4aa'],
+      ['System RAM Used', `${(mem.systemTotalGB - mem.systemFreeGB).toFixed(1)} / ${mem.systemTotalGB} GB`, mem.systemUsedPct, '#a855f7'],
+    ].map(([label, val, pct, color]) => `
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px;color:var(--muted)">${label}</span>
+          <span style="font-size:13px;font-weight:600">${val} <span style="color:var(--muted);font-weight:400">(${pct}%)</span></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">${bar(pct, color)}</div>
+      </div>`).join('');
+    // Performance
+    const perf = h.performance || {};
+    const p95color = perf.p95ResponseMs > 2000 ? '#ff4757' : perf.p95ResponseMs > 1000 ? '#ffa502' : '#2ed573';
+    const errcolor = parseFloat(perf.errorRate) > 5 ? '#ff4757' : parseFloat(perf.errorRate) > 1 ? '#ffa502' : '#2ed573';
+    document.getElementById('health-perf').innerHTML = [
+      ['p95 Response', perf.p95ResponseMs + ' ms', p95color, perf.p95ResponseMs > 2000 ? '⚠️ Slow' : '✅ Healthy'],
+      ['Error Rate', perf.errorRate + '%', errcolor, parseFloat(perf.errorRate) > 5 ? '⚠️ High' : '✅ Healthy'],
+      ['Requests', perf.totalRequests || 0, 'var(--accent)', 'in window'],
+    ].map(([label, val, color, note]) => `
+      <div class="card2" style="text-align:center">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${label}</div>
+        <div style="font-size:24px;font-weight:700;color:${color}">${val}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">${note}</div>
+      </div>`).join('');
+  } catch(e) {
+    document.getElementById('health-title').textContent = '❌ Failed to load health data';
+  }
+}
+
+async function clearLogs() {
+  try {
+    await apiPost('/dashboard/logs/clear');
+    toast('Logs cleared', 'success');
+    loadActivityLog();
+  } catch(e) { toast('Failed to clear logs', 'error'); }
+}
+
+async function restartServer() {
+  if (!confirm('Restart the server? It will be unavailable for a few seconds.')) return;
+  const btn = document.getElementById('restart-btn');
+  const panel = document.getElementById('restart-status-panel');
+  const stepsEl = document.getElementById('restart-steps');
+
+  const steps = [];
+  function addStep(icon, text, color) {
+    const ts = new Date().toLocaleTimeString('en-IN', { hour12: false });
+    steps.push({ icon, text, color, ts });
+    stepsEl.innerHTML = steps.map(s =>
+      `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:16px">${s.icon}</span>
+        <span style="color:${s.color || 'var(--text)'};flex:1">${s.text}</span>
+        <span style="color:var(--muted);font-size:12px">${s.ts}</span>
+      </div>`
+    ).join('');
+  }
+
+  btn.textContent = '⏳ Restarting...';
+  btn.disabled = true;
+  panel.style.display = 'block';
+  stepsEl.innerHTML = '';
+  addStep('📤', 'Sending restart signal...', '#f59e0b');
+
+  // Fire-and-forget — server will die before responding
+  fetch('/dashboard/restart', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } })
+    .catch(() => {});
+
+  // Wait 1.5s (matches server exit delay), then confirm server is DOWN
+  await new Promise(r => setTimeout(r, 1500));
+  addStep('🔴', 'Server going down...', '#ef4444');
+
+  // Phase 2: wait until server comes back UP (max 20s)
+  let attempts = 0;
+  async function poll() {
+    attempts++;
+    if (attempts > 40) {
+      addStep('❌', 'Did not restart within 20s — check Railway logs', '#ef4444');
+      btn.textContent = '⚡ Restart Server';
+      btn.disabled = false;
+      return;
+    }
+    try {
+      const res = await fetch('/health');
+      if (res.ok) {
+        addStep('✅', 'Server is back online!', '#22c55e');
+        btn.textContent = '⚡ Restart Server';
+        btn.disabled = false;
+        toast('Server is back online ✅', 'success');
+        uptimeSeconds = 0;
+        refreshAll();
+        setTimeout(() => { panel.style.display = 'none'; }, 4000);
+        return;
+      }
+    } catch { /* still down */ }
+    setTimeout(poll, 500);
+  }
+  setTimeout(poll, 500);
+}
+
+// ── Performance ────────────────────────────────────────────────────────────
+async function loadPerformance() {
+  try {
+    const data = await apiFetch('/dashboard/metrics');
+    const s = data.data || data;
+    const labels = s.history?.map(h => h.time) || generateTimeLabels(10);
+    const memData = s.history?.map(h => h.memoryMB) || [s.memoryMB || 0];
+    const respData = s.history?.map(h => h.avgResponseTime) || [s.avgResponseTime || 0];
+    const reqData = s.history?.map(h => h.requests) || [s.totalRequests || 0];
+    renderChart('chart-mem', 'line', labels, memData, '#00d4aa', charts.mem, c => charts.mem = c);
+    renderChart('chart-resp', 'line', labels, respData, '#0099ff', charts.resp, c => charts.resp = c);
+    renderChart('chart-reqs', 'bar', labels, reqData, '#a855f7', charts.reqs, c => charts.reqs = c);
+  } catch(e) { toast('Failed to load metrics', 'error'); }
+}
+
+function generateTimeLabels(n) {
+  const labels = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 30000);
+    labels.push(d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+  }
+  return labels;
+}
+
+function renderChart(id, type, labels, data, color, existing, setter) {
+  if (existing) { existing.data.labels = labels; existing.data.datasets[0].data = data; existing.update(); return; }
+  const ctx = document.getElementById(id).getContext('2d');
+  const chart = new Chart(ctx, {
+    type,
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: color,
+        backgroundColor: type === 'bar' ? color + '55' : color + '22',
+        borderWidth: 2,
+        fill: type === 'line',
+        tension: 0.4,
+        pointRadius: 3,
+        pointBackgroundColor: color
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {legend: {display: false}},
+      scales: {
+        x: {ticks: {color:'#6b7a8d', font:{size:10}}, grid: {color:'#1e2530'}},
+        y: {ticks: {color:'#6b7a8d', font:{size:10}}, grid: {color:'#1e2530'}}
+      }
+    }
+  });
+  setter(chart);
+}
+
+// ── Database ───────────────────────────────────────────────────────────────
+const COLLECTIONS = ['adminusers','users','customers','inventory','poles','cameras','projects','companies','worklogs','systemlogs'];
+
+async function loadDatabase() {
+  try {
+    const data = await apiFetch('/dashboard/dbstats');
+    const s = data.data || data;
+    document.getElementById('db-ping').textContent = s.pingMs !== undefined ? s.pingMs + ' ms' : '—';
+    document.getElementById('db-name').textContent = s.dbName || '—';
+    document.getElementById('db-host').textContent = s.host ? s.host + ':' + (s.port || 27017) : '—';
+    document.getElementById('db-storage').textContent = s.storageMB !== undefined ? s.storageMB : '—';
+    document.getElementById('db-data').textContent = s.dataMB !== undefined ? s.dataMB : '—';
+    document.getElementById('db-totaldocs').textContent = s.totalDocs !== undefined ? s.totalDocs : '—';
+    document.getElementById('db-conns').textContent = s.connections?.current ?? '—';
+    document.getElementById('db-conns-avail').textContent = s.connections?.available ?? '—';
+    const grid = document.getElementById('collection-grid');
+    const counts = s.collections || s;
+    grid.innerHTML = COLLECTIONS.map(name => {
+      const count = counts[name] ?? '—';
+      return `<div class="col-card"><div class="col-name">${name}</div><div class="col-count">${count}</div></div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('collection-grid').innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load database stats.</div>';
+  }
+}
+
+// ── Routes ─────────────────────────────────────────────────────────────────
+async function loadRoutes() {
+  try {
+    const data = await apiFetch('/dashboard/routes');
+    allRoutes = data.routes || data.data || [];
+    renderRoutes(allRoutes);
+  } catch(e) {
+    document.getElementById('routes-tbody').innerHTML = '<tr><td colspan="2" style="color:var(--red);padding:20px">Failed to load routes.</td></tr>';
+  }
+}
+
+function renderRoutes(routes) {
+  const tbody = document.getElementById('routes-tbody');
+  if (!routes.length) { tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted);padding:20px">No routes found.</td></tr>'; return; }
+  tbody.innerHTML = routes.map(r => {
+    const method = r.method || 'GET';
+    return `<tr><td><span class="method-badge method-${method}">${method}</span></td><td style="font-family:monospace;font-size:12px">${escHtml(r.path || r.route || '')}</td></tr>`;
+  }).join('');
+}
+
+function filterRoutes() {
+  const q = document.getElementById('route-search').value.toLowerCase();
+  renderRoutes(allRoutes.filter(r => (r.path || r.route || '').toLowerCase().includes(q) || (r.method || '').toLowerCase().includes(q)));
+}
+
+// ── Errors ─────────────────────────────────────────────────────────────────
+async function loadErrors() {
+  const container = document.getElementById('errors-container');
+  try {
+    const data = await apiFetch('/dashboard/errors');
+    const errors = data.data || data || [];
+    if (!errors.length) { container.innerHTML = '<div class="empty-state">✅ No errors recorded</div>'; return; }
+    container.innerHTML = errors.slice().reverse().map(e => {
+      const ts = e.created_at ? new Date(e.created_at).toLocaleString('en-GB') : '—';
+      const action = e.action || 'ERROR';
+      const desc = e.description || e.error_msg || JSON.stringify(e);
+      return `<div class="error-card"><span class="error-action">${escHtml(action)}</span><span class="error-desc">${escHtml(desc)}</span><span class="error-ts">${ts}</span></div>`;
+    }).join('');
+  } catch(e) {
+    container.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load errors.</div>';
+  }
+}
+
+// ── Seed ───────────────────────────────────────────────────────────────────
+async function runSeed(type) {
+  const resultEl = document.getElementById('seed-result-' + type);
+  resultEl.style.display = 'none';
+  try {
+    const data = await apiPost('/dashboard/seed/' + type);
+    resultEl.textContent = data.message || 'Done!';
+    resultEl.className = 'seed-result success';
+    resultEl.style.display = 'block';
+    toast(data.message || 'Seed completed', 'success');
+  } catch(e) {
+    resultEl.textContent = e.message || 'Failed';
+    resultEl.className = 'seed-result error';
+    resultEl.style.display = 'block';
+    toast('Seed failed: ' + e.message, 'error');
+  }
+}
+
+// ── Live Logs ──────────────────────────────────────────────────────────────
+async function loadLiveLogs() {
+  try {
+    const data = await apiFetch('/dashboard/requestlogs');
+    const logs = data.data || [];
+    liveLogs = logs.map(l => ({
+      method: l.method, url: l.url, status: l.status,
+      responseTime: l.responseTime, timestamp: l.timestamp
+    }));
+  } catch(e) { /* show whatever is in memory */ }
+  renderLiveLogs();
+}
+
+function connectSocket() {
+  socket = io();
+  socket.on('connect', () => console.log('Socket connected'));
+  socket.on('connect_error', (e) => console.warn('Socket error:', e.message));
+  socket.on('request:log', entry => {
+    const url = entry.url || '';
+    if (url.startsWith('/dashboard/') || url === '/health') return;
+    liveLogs.unshift(entry);
+    if (liveLogs.length > 100) liveLogs.pop();
+    renderLiveLogs();
+  });
+}
+
+function renderLiveLogs() {
+  const tbody = document.getElementById('live-tbody');
+  if (!liveLogs.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:20px;text-align:center">Waiting for requests...</td></tr>'; return; }
+  tbody.innerHTML = liveLogs.map(l => {
+    const ts = l.timestamp ? new Date(l.timestamp).toLocaleTimeString('en-GB') : '—';
+    const method = l.method || 'GET';
+    const status = l.status || l.statusCode || '—';
+    const statusClass = status >= 500 ? 'status-5xx' : status >= 400 ? 'status-4xx' : status >= 300 ? 'status-3xx' : 'status-2xx';
+    const rt = l.responseTime !== undefined ? l.responseTime + ' ms' : '—';
+    return `<tr>
+      <td style="color:var(--muted)">${ts}</td>
+      <td><span class="method-badge method-${method}">${method}</span></td>
+      <td style="font-family:monospace;font-size:12px">${escHtml(l.route || l.path || l.url || '—')}</td>
+      <td class="${statusClass}">${status}</td>
+      <td style="color:var(--muted)">${rt}</td>
+    </tr>`;
+  }).join('');
+}
+
+function clearLiveLogs() { liveLogs = []; renderLiveLogs(); }
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Keyboard ───────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-overlay').style.display !== 'none') doLogin();
+});
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

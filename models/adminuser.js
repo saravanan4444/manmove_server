@@ -6,20 +6,21 @@ var AdminuserSchema = new mongoose.Schema({
     mobile: Number,
     password: String,
     role: String,
+    company:String,
+    division: { type: [String], default: ['isp'] },
     pages: [],
+    tokenVersion: { type: Number, default: 0 },  // increment to invalidate all active sessions
     status: String,
     created_at: { type: Date },
     updated_at: { type: Date },
 });
-AdminuserSchema.pre('save', function (next) {
+AdminuserSchema.pre('save', function() {
     this.created_at = new Date();
-    console.log(this.created_at)
+});
+AdminuserSchema.pre('findOneAndUpdate', function() {
+    this.set({ updated_at: new Date() });
+});
+AdminuserSchema.index({ email: 1, company: 1 }, { unique: true });
+AdminuserSchema.index({ mobile: 1, company: 1 }, { sparse: true });
 
-    next();
-});
-AdminuserSchema.pre('findOneAndUpdate', function (next) {
-    this.updated_at = new Date();
-    console.log(this.updated_at)
-    next();
-});
 module.exports = mongoose.model('Adminuser', AdminuserSchema);

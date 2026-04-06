@@ -28,19 +28,18 @@ var DataSchema = new mongoose.Schema({
   latitude:String,
   longitude:String,
   status: String,
+  company: String,
+  zone: String,
+  area: String,
   applieddate:String,
   created_at: { type: Date },
   updated_at: { type: Date },
 });
-DataSchema.pre('save', function (next) {
+DataSchema.pre('save', function() {
   this.created_at = new Date();
-  console.log(this.created_at)
-  
-  next();
 });
-DataSchema.pre('findOneAndUpdate', function(next) {
+DataSchema.pre('findOneAndUpdate', function() {
   this.updated_at = new Date();
-  console.log(this.updated_at)
-  next();
 });
+DataSchema.index({ company: 1, status: 1 });
 module.exports = mongoose.model('Data', DataSchema);
