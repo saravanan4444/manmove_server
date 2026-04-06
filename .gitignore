@@ -34,7 +34,7 @@ uploads/
 # =========================
 # Seed / Utility Scripts (optional)
 # =========================
-seed-*.js
+# seed-*.js
 audit-roles.js
 check-dashboard.js
 
