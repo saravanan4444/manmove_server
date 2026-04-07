@@ -162,9 +162,11 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start server ─────────────────────────────────────────────────────────────
+// Railway sets process.env.PORT automatically
 const PORT = process.env.PORT || 3010;
+
 server.listen(PORT, () => {
-    logger.info('Server started', { port: PORT });
+    logger.info(`Server started on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
     require('./config/tokenBlacklist').startCleanup();
     require('./config/alertManager').startAlertMonitor();
 
@@ -189,13 +191,12 @@ server.listen(PORT, () => {
     require('./noc/sla-rollup').startSlaScheduler();
     require('./noc/sla-escalation').startSlaEscalation(io);
 
-    // ── Auto-purge session logs older than 90 days (runs daily at midnight) ──
     const SessionLog = require('./models/sessionlog');
     setInterval(async () => {
         const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
         const r = await SessionLog.deleteMany({ loginAt: { $lt: cutoff } }).catch(() => ({ deletedCount: 0 }));
         if (r.deletedCount > 0) logger.info('Session log retention purge', { deleted: r.deletedCount });
-    }, 24 * 60 * 60 * 1000); // every 24 hours
+    }, 24 * 60 * 60 * 1000);
 });
 
 // Audit startup after DB connects
