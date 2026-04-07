@@ -79,15 +79,33 @@ app.use((req, res, next) => {
 });
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
 
-// ── CORS ─────────────────────────────────────────────────────────────────────
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:4200').split(',');
+// ── ✅ UPDATED CORS ONLY ─────────────────────────────────────────────────────
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+
 app.use(cors({
     origin: (origin, cb) => {
-        if (!origin || origin.includes('localhost') || allowedOrigins.includes(origin)) return cb(null, true);
-        cb(new Error('CORS blocked: ' + origin));
+        if (!origin) return cb(null, true); // allow Postman / curl
+
+        if (origin.includes('localhost')) {
+            return cb(null, true);
+        }
+
+        if (allowedOrigins.includes(origin)) {
+            return cb(null, true);
+        }
+
+        console.log("❌ Blocked by CORS:", origin);
+        return cb(new Error('CORS blocked: ' + origin));
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
+
+// ✅ Preflight support
+app.options('*', cors());
 
 // ── NoSQL injection guard ────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -162,7 +180,6 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start server ─────────────────────────────────────────────────────────────
-// Railway sets process.env.PORT automatically
 const PORT = process.env.PORT || 3010;
 
 server.listen(PORT, () => {
