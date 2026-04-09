@@ -87,7 +87,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 
 app.use(cors({
     origin: (origin, cb) => {
-        if (!origin) return cb(null, true); // allow Postman / curl
+        if (!origin) return cb(null, true);
 
         if (origin.includes('localhost')) {
             return cb(null, true);
@@ -104,7 +104,6 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
 
-// ✅ Preflight support
 app.options('*', cors());
 
 // ── NoSQL injection guard ────────────────────────────────────────────────────
@@ -127,6 +126,11 @@ app.use('/api/v1', (req, res, next) => req.user ? byRole(req, res, next) : next(
 // ── Body parsing ─────────────────────────────────────────────────────────────
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ limit: '1mb', extended: true }));
+
+// ✅✅✅ ONLY ADDITION (ROOT ROUTE)
+app.get('/', (req, res) => {
+    res.redirect('/dashboard');
+});
 
 // ── Dashboard & static ───────────────────────────────────────────────────────
 app.use('/dashboard', dashboardRouter);
@@ -165,7 +169,6 @@ const routeModules = [
     require('./routes/fibercores'),
 ];
 
-// Mount on /api/v1, /api/v2 and legacy /rest/api/latest
 for (const mod of routeModules) {
     app.use('/api/v1', mod);
     app.use('/api/v2', mod);
