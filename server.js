@@ -39,7 +39,7 @@ app.use(helmet({
             scriptSrcAttr: ["'unsafe-inline'"],
             styleSrc:   ["'self'", "'unsafe-inline'"],
             imgSrc:     ["'self'", "data:", "https:", "http:"],
-            connectSrc: ["'self'", "ws:", "wss:"],
+            connectSrc: ["'self'", "ws:", "wss:", "https://cdn.jsdelivr.net"],
         }
     }
 }));
@@ -138,6 +138,9 @@ app.use(express.static('public', {
     etag: false, lastModified: false,
     setHeaders: (res, path) => { if (path.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); },
 }));
+
+// ── Favicon ───────────────────────────────────────────────────────────────────
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
