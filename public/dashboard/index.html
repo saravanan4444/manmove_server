@@ -404,7 +404,7 @@ async function doLogin() {
   errEl.style.display = 'none';
   if (!user || !pass) { errEl.textContent = 'Please enter username and password.'; errEl.style.display = 'block'; return; }
   try {
-    const res = await fetch('/api/v1/adminlogin', {
+    const res = await fetch('/rest/api/latest/adminlogin', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({username: user, password: pass})
