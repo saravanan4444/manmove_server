@@ -79,32 +79,26 @@ app.use((req, res, next) => {
 });
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
 
-// ── ✅ UPDATED CORS ONLY ─────────────────────────────────────────────────────
+// ── CORS ─────────────────────────────────────────────────────────────────────
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
     origin: (origin, cb) => {
         if (!origin) return cb(null, true);
-
-        if (origin.includes('localhost')) {
-            return cb(null, true);
-        }
-
-        if (allowedOrigins.includes(origin)) {
-            return cb(null, true);
-        }
-
+        if (origin.includes('localhost')) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
         console.log("❌ Blocked by CORS:", origin);
         return cb(new Error('CORS blocked: ' + origin));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-}));
+};
 
-app.options('*', cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // ── NoSQL injection guard ────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -213,6 +207,12 @@ server.listen(PORT, () => {
     require('./monitoring/nvr-monitor').startNvrMonitoring(io);
     require('./noc/sla-rollup').startSlaScheduler();
     require('./noc/sla-escalation').startSlaEscalation(io);
+
+    // Keep Railway server warm — ping self every 10 minutes to prevent cold start
+    const SERVER_URL = process.env.SERVER_URL || `http://localhost:${PORT}`;
+    setInterval(() => {
+        require('http').get(`${SERVER_URL}/health`).on('error', () => {});
+    }, 10 * 60 * 1000);
 
     const SessionLog = require('./models/sessionlog');
     setInterval(async () => {
