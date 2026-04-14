@@ -214,8 +214,18 @@ router.post('/poles/bulk', authenticate, permitMatrix('leads', 'create'), async 
     try {
         const poles = Array.isArray(req.body) ? req.body : req.body.poles;
         if (!poles?.length) return res.status(200).json({ status: 400, message: 'poles array required' });
-        const docs = await Pole.insertMany(poles, { ordered: false });
-        res.status(200).json({ status: 200, inserted: docs.length });
+        const ops = poles.map(p => ({
+            updateOne: {
+                filter: { pole_number: String(p.pole_number), project_id: p.project_id },
+                update: {
+                    $setOnInsert: { status: 'not_started', current_stage: 'digging', created_at: new Date() },
+                    $set: { address: p.address, police_station: p.police_station, junction: p.junction, latitude: p.latitude, longitude: p.longitude, anpr_count: p.anpr_count, cctv_count: p.cctv_count, company: p.company }
+                },
+                upsert: true
+            }
+        }));
+        const result = await Pole.bulkWrite(ops, { ordered: false });
+        res.status(200).json({ status: 200, inserted: result.upsertedCount, updated: result.modifiedCount });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 

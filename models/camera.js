@@ -37,5 +37,6 @@ CameraSchema.pre('findOneAndUpdate', function() { this.set({ updated_at: new Dat
 
 CameraSchema.index({ project_id: 1, status: 1 });
 CameraSchema.index({ pole_id: 1 });
+CameraSchema.index({ camera_number: 1, project_id: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('cameras', CameraSchema);

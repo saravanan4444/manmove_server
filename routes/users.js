@@ -13,7 +13,8 @@ async function listUsers(req, res) {
         if (req.query.status)  query.status  = req.query.status;
         if (req.query.company) query.company = req.query.company;
         if (req.query.zone)    query.zone    = req.query.zone;
-        const data = await userList.find(query).sort({ created_at: -1 });
+        const data = await userList.find(query, '-password -activities')
+            .sort({ created_at: -1 }).lean();
         res.status(200).json({ status: 200, data });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 }

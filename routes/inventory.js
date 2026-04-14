@@ -210,8 +210,14 @@ router.get('/deploymentlogs/item/:itemId', authenticate, async (req, res) => {
 
 // ── Deployment Tasks ──
 router.get('/deploymenttasks', authenticate, scopeToTenant, async (req, res) => {
-    try { res.status(200).json({ status: 200, data: await DeploymentTask.find(req.query).sort({ createdAt: -1 }) }); }
-    catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+    try {
+        const query = {};
+        if (req.query.company)    query.company    = req.query.company;
+        if (req.query.division)   query.division   = req.query.division;
+        if (req.query.taskStatus) query.taskStatus = req.query.taskStatus;
+        if (req.query.assignedTo) query.assignedTo = req.query.assignedTo;
+        res.status(200).json({ status: 200, data: await DeploymentTask.find(query).sort({ createdAt: -1 }).lean() });
+    } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 router.post('/deploymenttasks', authenticate, permitMatrix('inventory', 'create'), async (req, res) => {
     try { res.status(200).json({ status: 200, data: await DeploymentTask.create(req.body) }); }

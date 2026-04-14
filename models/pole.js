@@ -36,5 +36,6 @@ PoleSchema.pre('findOneAndUpdate', function() { this.set({ updated_at: new Date(
 
 PoleSchema.index({ project_id: 1, status: 1 });
 PoleSchema.index({ project_id: 1, zone_id: 1 });
+PoleSchema.index({ pole_number: 1, project_id: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('poles', PoleSchema);

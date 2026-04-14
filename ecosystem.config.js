@@ -15,3 +15,7 @@ module.exports = {
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
   }],
 };
+// NOTE: PM2 does NOT auto-load .env — use one of:
+//   1. dotenv in server.js (already handled if require('dotenv').config() is at top)
+//   2. pm2 start ecosystem.config.js --env production
+//   3. Or set env vars in the OS before starting PM2

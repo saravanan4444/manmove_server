@@ -92,7 +92,7 @@ function signToken(userData, roleDoc) {
         hiddenFields: roleDoc?.hiddenFields || [],
         tokenVersion: userData.tokenVersion || 0,
     };
-    const accessToken  = jwt.sign(payload, SECRET, { expiresIn: '12h' });
+    const accessToken  = jwt.sign(payload, SECRET, { expiresIn: '24h' });
     const refreshToken = jwt.sign(
         { id: userData._id, email: userData.email, tokenVersion: payload.tokenVersion },
         REFRESH_SECRET,

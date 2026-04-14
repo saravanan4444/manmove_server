@@ -33,24 +33,66 @@ router.get('/cameras', authenticate, scopeToTenant, async (req, res) => {
     try {
         const Pole = require('../models/pole');
         const query = Object.assign({}, req.query);
+        const companyFilter = query.company;
         delete query.division; delete query.company;
         const stationFilter = query.station; delete query.station;
         if (query.pole_id)    query.pole_id    = new mongoose.Types.ObjectId(query.pole_id);
         if (query.project_id) query.project_id = new mongoose.Types.ObjectId(query.project_id);
-        // If station filter, resolve pole_ids for that station first
+        // Superadmin company filter: resolve via projects
+        if (companyFilter && !query.project_id && !query.pole_id) {
+            const Project = require('../models/project');
+            const projectIds = await Project.find({ company: companyFilter }).distinct('_id');
+            query.project_id = { $in: projectIds };
+        }
         if (stationFilter) {
             const poleMatch = { police_station: stationFilter };
-            if (req.query.company)    poleMatch.company    = req.query.company;
             if (req.query.project_id) poleMatch.project_id = new mongoose.Types.ObjectId(req.query.project_id);
             const poles = await Pole.find(poleMatch, '_id').lean();
             query.pole_id = { $in: poles.map(p => p._id) };
         }
-        res.status(200).json({ status: 200, data: await Camera.find(query).sort({ created_at: -1 }).lean() });
+        const cameras = await Camera.find(query,
+            'camera_number camera_type pole_id project_id police_station junction address latitude longitude status current_stage assigned_name ip_address nvr_id nvr_channel lpr_enabled company'
+        ).sort({ project_id: 1, status: 1 }).lean();
+
+        // Enrich with pole location data if missing
+        const poleIds = [...new Set(cameras.filter(c => c.pole_id && !c.latitude).map(c => c.pole_id.toString()))];
+        if (poleIds.length) {
+            const poles = await Pole.find({ _id: { $in: poleIds } }, 'police_station junction address latitude longitude').lean();
+            const poleMap = Object.fromEntries(poles.map(p => [p._id.toString(), p]));
+            cameras.forEach(c => {
+                if (c.pole_id && !c.latitude) {
+                    const pole = poleMap[c.pole_id.toString()];
+                    if (pole) {
+                        c.police_station = c.police_station || pole.police_station;
+                        c.junction       = c.junction       || pole.junction;
+                        c.address        = c.address        || pole.address;
+                        c.latitude       = c.latitude       || pole.latitude;
+                        c.longitude      = c.longitude      || pole.longitude;
+                    }
+                }
+            });
+        }
+        res.status(200).json({ status: 200, data: cameras });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 router.post('/cameras', authenticate, permitMatrix('projects', 'create'), async (req, res) => {
     try { res.status(200).json({ status: 200, data: await Camera.create(req.body) }); }
     catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+});
+router.post('/cameras/bulk', authenticate, permitMatrix('projects', 'create'), async (req, res) => {
+    try {
+        const cameras = Array.isArray(req.body) ? req.body : req.body.cameras;
+        if (!cameras?.length) return res.status(200).json({ status: 400, message: 'cameras array required' });
+        const ops = cameras.map(c => ({
+            updateOne: {
+                filter: { camera_number: c.camera_number, project_id: c.project_id },
+                update: { $setOnInsert: { status: 'not_started', current_stage: 'unboxed', created_at: new Date() }, $set: { pole_id: c.pole_id, police_station: c.police_station, latitude: c.latitude, longitude: c.longitude, camera_type: c.camera_type, company: c.company } },
+                upsert: true
+            }
+        }));
+        const result = await Camera.bulkWrite(ops, { ordered: false });
+        res.status(200).json({ status: 200, inserted: result.upsertedCount, updated: result.modifiedCount });
+    } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 router.put('/cameras/:id', authenticate, permitMatrix('projects', 'update'), async (req, res) => {
     try { res.status(200).json({ status: 200, data: await Camera.findByIdAndUpdate(req.params.id, req.body, { new: true }) }); }
@@ -102,10 +144,17 @@ router.get('/cameratimeline/:id', authenticate, async (req, res) => {
 // ── Camera Maintenance ──
 router.get('/cameramaintenance', authenticate, scopeToTenant, async (req, res) => {
     try {
-        const query = Object.assign({}, req.query); delete query.division; delete query.company;
+        const query = Object.assign({}, req.query);
+        const companyFilter = query.company;
+        delete query.division; delete query.company;
         if (query.camera_id)  query.camera_id  = new mongoose.Types.ObjectId(query.camera_id);
         if (query.project_id) query.project_id = new mongoose.Types.ObjectId(query.project_id);
-        res.status(200).json({ status: 200, data: await CameraMaintenance.find(query).sort({ created_at: -1 }) });
+        if (companyFilter && !query.project_id) {
+            const Project = require('../models/project');
+            const projectIds = await Project.find({ company: companyFilter }).distinct('_id');
+            query.project_id = { $in: projectIds };
+        }
+        res.status(200).json({ status: 200, data: await CameraMaintenance.find(query).sort({ created_at: -1 }).lean() });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 router.post('/cameramaintenance', authenticate, permitMatrix('projects', 'create'), async (req, res) => {

@@ -115,21 +115,58 @@ router.get('/platformstats', authenticate, requireSuperadmin, async (req, res) =
             const e = new Date(day); e.setHours(23,59,59,999);
             dayRanges.push({ start: s, end: e });
         }
-        const [totalCompanies, totalAdmins, totalUsers, totalProjects, companyList, recentLogs, growth, healthSuccess, healthErrors] = await Promise.all([
+
+        const sixMonthsAgo = monthRanges[0].start;
+        const sevenDaysAgo = dayRanges[0].start;
+
+        const [totalCompanies, totalAdmins, totalUsers, totalProjects, companyList, recentLogs,
+               growthAgg, healthAgg, adminCountAgg] = await Promise.all([
             companies.countDocuments({}),
             adminuser.countDocuments({}),
             userList.countDocuments({}),
             Project.countDocuments({}),
             companies.find({}, 'name email mobile address divisions status createdAt').lean(),
             SystemLog.find({}).sort({ created_at: -1 }).limit(10).lean(),
-            Promise.all(monthRanges.map(r => companies.countDocuments({ createdAt: { $gte: r.start, $lte: r.end } }))),
-            Promise.all(dayRanges.map(r => SystemLog.countDocuments({ status: 'success', created_at: { $gte: r.start, $lte: r.end } }))),
-            Promise.all(dayRanges.map(r => SystemLog.countDocuments({ status: 'error', created_at: { $gte: r.start, $lte: r.end } }))),
+            // Single aggregation for growth instead of N queries
+            companies.aggregate([
+                { $match: { createdAt: { $gte: sixMonthsAgo } } },
+                { $group: { _id: { y: { $year: '$createdAt' }, m: { $month: '$createdAt' } }, count: { $sum: 1 } } }
+            ]),
+            // Single aggregation for health instead of 2×N queries
+            SystemLog.aggregate([
+                { $match: { created_at: { $gte: sevenDaysAgo } } },
+                { $group: { _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, status: '$status' }, count: { $sum: 1 } } }
+            ]),
+            // Single aggregation for admin counts instead of N queries
+            adminuser.aggregate([{ $group: { _id: '$company', count: { $sum: 1 } } }])
         ]);
+
+        // Map aggregation results back to arrays
+        const adminMap = Object.fromEntries(adminCountAgg.map(a => [a._id, a.count]));
+        const growthMap = Object.fromEntries(growthAgg.map(a => [`${a._id.y}-${a._id.m}`, a.count]));
+        const growth = monthRanges.map(r => {
+            const d = r.start; return growthMap[`${d.getFullYear()}-${d.getMonth()+1}`] || 0;
+        });
+        const healthMap = {};
+        healthAgg.forEach((a) => {
+            if (!healthMap[a._id.date]) healthMap[a._id.date] = {};
+            healthMap[a._id.date][a._id.status] = a.count;
+        });
+        const healthSuccess = dayRanges.map(r => {
+            const k = r.start.toISOString().slice(0,10); return healthMap[k]?.success || 0;
+        });
+        const healthErrors = dayRanges.map(r => {
+            const k = r.start.toISOString().slice(0,10); return healthMap[k]?.error || 0;
+        });
+
         const divCount = { isp: 0, camera: 0, anpr: 0 };
-        companyList.forEach(c => { if (c.divisions) { if (c.divisions.isp) divCount.isp++; if (c.divisions.camera) divCount.camera++; if (c.divisions.anpr) divCount.anpr++; } });
-        const enriched = await Promise.all(companyList.map(async c => ({ ...c, adminCount: await adminuser.countDocuments({ company: c.name }) })));
-        res.status(200).json({ status: 200, totalCompanies, totalAdminUsers: totalAdmins, totalFieldUsers: totalUsers, totalProjects, companies: enriched, recentLogs, charts: { growth: { labels: months, data: growth }, health: { labels: days, success: healthSuccess, errors: healthErrors }, divisions: { labels: ['ISP','Camera','ANPR'], data: [divCount.isp, divCount.camera, divCount.anpr] } } });
+        const enriched = companyList.map(c => {
+            if (c.divisions) { if (c.divisions.isp) divCount.isp++; if (c.divisions.camera) divCount.camera++; if (c.divisions.anpr) divCount.anpr++; }
+            return { ...c, adminCount: adminMap[c.name] || 0 };
+        });
+
+        res.status(200).json({ status: 200, totalCompanies, totalAdminUsers: totalAdmins, totalFieldUsers: totalUsers, totalProjects, companies: enriched, recentLogs,
+            charts: { growth: { labels: months, data: growth }, health: { labels: days, success: healthSuccess, errors: healthErrors }, divisions: { labels: ['ISP','Camera','ANPR'], data: [divCount.isp, divCount.camera, divCount.anpr] } } });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 
@@ -156,20 +193,43 @@ router.get('/dashcount', authenticate, async (req, res) => {
         const period    = req.query.period || 'week';
         const query     = company ? { company } : {};
         const now = new Date();
-        const labels = [], dateRanges = [];
+
+        // Build date range for aggregation
+        let startDate, groupFormat, labels;
         if (period === 'week') {
-            for (let i = 6; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); labels.push(d.toLocaleDateString('en-IN', { weekday: 'short' })); const s = new Date(d); s.setHours(0,0,0,0); const e = new Date(d); e.setHours(23,59,59,999); dateRanges.push({ start: s, end: e }); }
+            startDate = new Date(now); startDate.setDate(startDate.getDate() - 6); startDate.setHours(0,0,0,0);
+            groupFormat = '%Y-%m-%d';
+            labels = Array.from({length:7}, (_,i) => { const d = new Date(now); d.setDate(d.getDate()-(6-i)); return d.toLocaleDateString('en-IN',{weekday:'short'}); });
         } else if (period === 'month') {
-            for (let i = 3; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i * 7); labels.push('W' + (4 - i)); const s = new Date(d); s.setDate(s.getDate() - 6); s.setHours(0,0,0,0); const e = new Date(d); e.setHours(23,59,59,999); dateRanges.push({ start: s, end: e }); }
+            startDate = new Date(now); startDate.setDate(startDate.getDate() - 27); startDate.setHours(0,0,0,0);
+            groupFormat = '%Y-W%V';
+            labels = ['W1','W2','W3','W4'];
         } else {
-            for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); labels.push(d.toLocaleDateString('en-IN', { month: 'short' })); dateRanges.push({ start: new Date(d.getFullYear(), d.getMonth(), 1), end: new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999) }); }
+            startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+            groupFormat = '%Y-%m';
+            labels = Array.from({length:12}, (_,i) => { const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1); return d.toLocaleDateString('en-IN',{month:'short'}); });
         }
-        const [leads, custs] = await Promise.all([Product.countDocuments(query), customers.countDocuments(query)]);
-        const [leadsChart, custsChart] = await Promise.all([
-            Promise.all(dateRanges.map(r => Product.countDocuments({ ...query, created_at: { $gte: r.start, $lte: r.end } }))),
-            Promise.all(dateRanges.map(r => customers.countDocuments({ ...query, created_at: { $gte: r.start, $lte: r.end } })))
+
+        const matchBase = { ...query, created_at: { $gte: startDate } };
+        const [leads, custs, leadsAgg, custsAgg] = await Promise.all([
+            Product.countDocuments(query),
+            customers.countDocuments(query),
+            Product.aggregate([{ $match: matchBase }, { $group: { _id: { $dateToString: { format: groupFormat, date: '$created_at' } }, count: { $sum: 1 } } }]),
+            customers.aggregate([{ $match: matchBase }, { $group: { _id: { $dateToString: { format: groupFormat, date: '$created_at' } }, count: { $sum: 1 } } }])
         ]);
-        res.status(200).json({ status: 200, leads, customers: custs, chart: { labels, leads: leadsChart, customers: custsChart } });
+
+        const leadsMap = Object.fromEntries(leadsAgg.map((a) => [a._id, a.count]));
+        const custsMap = Object.fromEntries(custsAgg.map((a) => [a._id, a.count]));
+
+        // Rebuild label keys to match aggregation format
+        const keys = period === 'week'
+            ? Array.from({length:7}, (_,i) => { const d = new Date(now); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10); })
+            : period === 'month'
+            ? ['W1','W2','W3','W4']
+            : Array.from({length:12}, (_,i) => { const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1); return d.toISOString().slice(0,7); });
+
+        res.status(200).json({ status: 200, leads, customers: custs,
+            chart: { labels, leads: keys.map(k => leadsMap[k] || 0), customers: keys.map(k => custsMap[k] || 0) } });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 

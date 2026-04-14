@@ -6,6 +6,7 @@ const Pole     = require('../models/pole');
 const Worklog  = require('../models/worklog');
 const Material = require('../models/material');
 const Expense  = require('../models/expense');
+const StationMeta = require('../models/stationmeta');
 const SystemLog = require('../models/systemlog');
 const { authenticate, scopeToTenant, permit, permitMatrix, SUPERADMIN_ROLES } = require('../config/authMiddleware');
 const { log } = require('../config/auditLog');
@@ -38,6 +39,15 @@ router.get('/projects', authenticate, scopeToTenant, async (req, res) => {
 router.post('/projects', authenticate, scopeToTenant, permitMatrix('projects', 'create'), async (req, res) => {
     try {
         if (!req.body.company) return res.status(200).json({ status: 400, message: 'company is required' });
+        // Auto-populate state/district from company if not provided
+        if (!req.body.state || !req.body.district) {
+            const Company = require('../models/companies');
+            const company = await Company.findOne({ name: req.body.company }).lean();
+            if (company) {
+                if (!req.body.state    && company.state)    req.body.state    = company.state;
+                if (!req.body.district && company.district) req.body.district = company.district;
+            }
+        }
         const data = await Project.create(req.body);
         syslog(req, 'PROJECT_CREATED', 'project', data._id, 'Project "' + data.name + '" created');
         await log({ req, action: 'PROJECT_CREATE', resource: 'projects', resourceId: data._id, after: { name: data.name, company: data.company } });
@@ -71,11 +81,19 @@ router.delete('/projects/:id', authenticate, permitMatrix('projects', 'delete'),
 router.get('/poles', authenticate, scopeToTenant, async (req, res) => {
     try {
         const query = Object.assign({}, req.query);
+        const companyFilter = query.company;
         delete query.division; delete query.company;
         if (query.project_id) query.project_id = new mongoose.Types.ObjectId(query.project_id);
         if (query.zone_id)    query.zone_id    = new mongoose.Types.ObjectId(query.zone_id);
         query.status = { $ne: 'deleted' };
-        const data = await Pole.find(query).sort({ created_at: -1 });
+        // Superadmin company filter: resolve via projects
+        if (companyFilter && !query.project_id) {
+            const projectIds = await Project.find({ company: companyFilter }).distinct('_id');
+            query.project_id = { $in: projectIds };
+        }
+        const data = await Pole.find(query,
+            'pole_number police_station junction address latitude longitude anpr_count cctv_count status current_stage assigned_name project_id zone_id company created_at'
+        ).sort({ project_id: 1, status: 1 }).lean();
         res.status(200).json({ status: 200, data });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
@@ -99,10 +117,18 @@ router.delete('/poles/:id', authenticate, permitMatrix('projects', 'delete'), as
 router.get('/worklogs', authenticate, scopeToTenant, async (req, res) => {
     try {
         const query = Object.assign({}, req.query);
+        const companyFilter = query.company;
         delete query.division; delete query.company;
         if (query.pole_id)    query.pole_id    = new mongoose.Types.ObjectId(query.pole_id);
         if (query.project_id) query.project_id = new mongoose.Types.ObjectId(query.project_id);
-        const data = await Worklog.find(query).sort({ created_at: -1 });
+        if (companyFilter && !query.project_id) {
+            const projectIds = await Project.find({ company: companyFilter }).distinct('_id');
+            query.project_id = { $in: projectIds };
+        }
+        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+        delete query.limit;
+        const data = await Worklog.find(query, 'pole_id project_id stage user_name remarks photo_url latitude longitude created_at')
+            .sort({ created_at: -1 }).limit(limit).lean();
         res.status(200).json({ status: 200, data });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
@@ -151,9 +177,15 @@ router.post('/worklogs/bulk', authenticate, permitMatrix('projects', 'update'), 
 // ── Materials ──
 router.get('/materials', authenticate, scopeToTenant, async (req, res) => {
     try {
-        const query = Object.assign({}, req.query); delete query.division; delete query.company;
+        const query = Object.assign({}, req.query);
+        const companyFilter = query.company;
+        delete query.division; delete query.company;
         if (query.project_id) query.project_id = new mongoose.Types.ObjectId(query.project_id);
-        res.status(200).json({ status: 200, data: await Material.find(query) });
+        if (companyFilter && !query.project_id) {
+            const projectIds = await Project.find({ company: companyFilter }).distinct('_id');
+            query.project_id = { $in: projectIds };
+        }
+        res.status(200).json({ status: 200, data: await Material.find(query).lean() });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 router.post('/materials', authenticate, permitMatrix('inventory', 'create'), async (req, res) => {
@@ -180,9 +212,15 @@ router.delete('/materials/:id', authenticate, permitMatrix('inventory', 'delete'
 // ── Expenses ──
 router.get('/expenses', authenticate, scopeToTenant, async (req, res) => {
     try {
-        const query = Object.assign({}, req.query); delete query.division; delete query.company;
+        const query = Object.assign({}, req.query);
+        const companyFilter = query.company;
+        delete query.division; delete query.company;
         if (query.project_id) query.project_id = new mongoose.Types.ObjectId(query.project_id);
-        res.status(200).json({ status: 200, data: await Expense.find(query).sort({ created_at: -1 }) });
+        if (companyFilter && !query.project_id) {
+            const projectIds = await Project.find({ company: companyFilter }).distinct('_id');
+            query.project_id = { $in: projectIds };
+        }
+        res.status(200).json({ status: 200, data: await Expense.find(query).sort({ created_at: -1 }).lean() });
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 router.post('/expenses', authenticate, permitMatrix('projects', 'update'), async (req, res) => {
@@ -248,37 +286,60 @@ router.get('/anprzoneProgress', authenticate, scopeToTenant, async (req, res) =>
     } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 
-module.exports = router;
-
 // ── Station-wise aggregation ──────────────────────────────────────────────────
 router.get('/stations', authenticate, scopeToTenant, async (req, res) => {
     try {
-        const match = {};
-        if (req.query.company)    match.company    = req.query.company;
-        if (req.query.project_id) match.project_id = new mongoose.Types.ObjectId(req.query.project_id);
-
-        const data = await Pole.aggregate([
-            { $match: match },
-            { $group: {
-                _id:        '$police_station',
-                total:      { $sum: 1 },
-                completed:  { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
-                in_progress:{ $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
-                anpr_count: { $sum: { $ifNull: ['$anpr_count', 0] } },
-                cctv_count: { $sum: { $ifNull: ['$cctv_count', 0] } },
-            }},
-            { $project: {
-                _id: 0,
-                name:        '$_id',
-                total:       1,
-                completed:   1,
-                in_progress: 1,
-                anpr_count:  1,
-                cctv_count:  1,
-                percent:     { $cond: [{ $gt: ['$total', 0] }, { $multiply: [{ $divide: ['$completed', '$total'] }, 100] }, 0] },
-            }},
-            { $sort: { name: 1 } },
+        const match = { status: { $ne: 'deleted' } };
+        if (req.query.project_id) {
+            match.project_id = new mongoose.Types.ObjectId(req.query.project_id);
+        } else if (req.query.company) {
+            const projectIds = await Project.find({ company: req.query.company }).distinct('_id');
+            match.project_id = { $in: projectIds };
+        }
+        const [data, metas] = await Promise.all([
+            Pole.aggregate([
+                { $match: match },
+                { $group: {
+                    _id: '$police_station',
+                    total:          { $sum: 1 },
+                    completed:      { $sum: { $cond: [{ $eq: ['$status','completed'] }, 1, 0] } },
+                    in_progress:    { $sum: { $cond: [{ $eq: ['$status','in_progress'] }, 1, 0] } },
+                    anpr_count:     { $sum: { $ifNull: ['$anpr_count', 0] } },
+                    cctv_count:     { $sum: { $ifNull: ['$cctv_count', 0] } },
+                    completed_anpr: { $sum: { $cond: [{ $eq: ['$status','completed'] }, { $ifNull: ['$anpr_count',0] }, 0] } },
+                    completed_cctv: { $sum: { $cond: [{ $eq: ['$status','completed'] }, { $ifNull: ['$cctv_count',0] }, 0] } },
+                    lat: { $avg: '$latitude' },
+                    lng: { $avg: '$longitude' },
+                    company: { $first: '$company' },
+                }},
+                { $project: { _id:0, name:'$_id', total:1, completed:1, in_progress:1, anpr_count:1, cctv_count:1, completed_anpr:1, completed_cctv:1, lat:1, lng:1, company:1,
+                    percent: { $cond: [{ $gt:['$total',0] }, { $multiply:[{ $divide:['$completed','$total'] }, 100] }, 0] } }},
+                { $sort: { name: 1 } },
+            ]),
+            StationMeta.find(req.query.company ? { company: req.query.company } : {}).lean()
         ]);
+        // Merge pinned lat/lng and nvr_id from StationMeta
+        const metaMap = Object.fromEntries(metas.map(m => [m.name, m]));
+        data.forEach(s => {
+            const m = metaMap[s.name];
+            if (m) {
+                if (m.lat && m.lng) { s.lat = m.lat; s.lng = m.lng; s.pinned = true; }
+                if (m.nvr_id) s.nvr_id = m.nvr_id;
+                if (m.address) s.address = m.address;
+            }
+        });
+        res.json({ status: 200, data });
+    } catch (err) { res.json({ status: 500, message: err.message }); }
+});
+
+// Pin station location + NVR assignment
+router.put('/stations/:name', authenticate, permitMatrix('projects', 'update'), async (req, res) => {
+    try {
+        const data = await StationMeta.findOneAndUpdate(
+            { name: req.params.name, company: req.body.company || req.user?.company },
+            { $set: { lat: req.body.lat, lng: req.body.lng, nvr_id: req.body.nvr_id, address: req.body.address, notes: req.body.notes, project_id: req.body.project_id } },
+            { upsert: true, new: true }
+        );
         res.json({ status: 200, data });
     } catch (err) { res.json({ status: 500, message: err.message }); }
 });
@@ -286,9 +347,15 @@ router.get('/stations', authenticate, scopeToTenant, async (req, res) => {
 router.get('/stations/:name/poles', authenticate, scopeToTenant, async (req, res) => {
     try {
         const match = { police_station: req.params.name };
-        if (req.query.company)    match.company    = req.query.company;
-        if (req.query.project_id) match.project_id = new mongoose.Types.ObjectId(req.query.project_id);
+        if (req.query.project_id) {
+            match.project_id = new mongoose.Types.ObjectId(req.query.project_id);
+        } else if (req.query.company) {
+            const projectIds = await Project.find({ company: req.query.company }).distinct('_id');
+            match.project_id = { $in: projectIds };
+        }
         const data = await Pole.find(match).sort({ pole_number: 1 }).lean();
         res.json({ status: 200, data });
     } catch (err) { res.json({ status: 500, message: err.message }); }
 });
+
+module.exports = router;
