@@ -35,6 +35,6 @@ function byRole(req, res, next) {
 
 module.exports = {
     global: make(1000),
-    login:  make(10, 15 * 60 * 1000),
+    login:  make(50, 15 * 60 * 1000),
     byRole,
 };
