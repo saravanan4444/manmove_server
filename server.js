@@ -89,6 +89,7 @@ const corsOptions = {
     origin: (origin, cb) => {
         if (!origin) return cb(null, true);
         if (origin.includes('localhost')) return cb(null, true);
+        if (origin.includes('truport.in')) return cb(null, true);
         if (allowedOrigins.includes(origin)) return cb(null, true);
         console.log("❌ Blocked by CORS:", origin);
         return cb(new Error('CORS blocked: ' + origin));
