@@ -1,7 +1,9 @@
 const Nvr            = require('../models/nvr');
 const NocAlert       = require('../models/nocAlert');
+const NvrStatusLog   = require('../models/nvrstatuslog');
 const { pingHost }   = require('./ping');
 const { checkHttpHealth } = require('./http-health');
+const { predictHddFailure, predictStorageFull } = require('./ai-engine');
 
 const INTERVAL_MS    = 60 * 1000;
 const FAIL_THRESHOLD = 3;
@@ -26,6 +28,7 @@ async function checkNvr(nvr, io) {
 
     if (wasOffline) {
       io.emit('nvr:status_change', { nvr_id: nvr._id, nvr_number: nvr.nvr_number, status: 'online' });
+      await NvrStatusLog.create({ nvr_id: nvr._id, nvr_number: nvr.nvr_number, company: nvr.company, status: 'online', changed_at: now });
       await NocAlert.updateMany(
         { description: { $regex: nvr.nvr_number }, severity: 'critical', resolved_at: null },
         { resolved_at: now }
@@ -43,6 +46,7 @@ async function checkNvr(nvr, io) {
     if (failures >= FAIL_THRESHOLD && nvr.status !== 'offline') {
       update.status = 'offline';
       io.emit('nvr:status_change', { nvr_id: nvr._id, nvr_number: nvr.nvr_number, status: 'offline', nvr_type: nvr.nvr_type });
+      await NvrStatusLog.create({ nvr_id: nvr._id, nvr_number: nvr.nvr_number, company: nvr.company, status: 'offline', changed_at: now });
 
       const existing = await NocAlert.findOne({
         description: { $regex: nvr.nvr_number }, severity: 'critical', resolved_at: null
@@ -85,6 +89,38 @@ async function checkNvr(nvr, io) {
     const freeGb = (totalCap - totalUsed) * 1024;
     if (nvr.daily_write_gb > 0 && freeGb > 0) {
       update.days_until_full = Math.floor(freeGb / nvr.daily_write_gb);
+    }
+
+    // ── AI: HDD failure prediction per slot ──────────────────────────────
+    if (nvr.hdd_slots?.length) {
+      let worstRisk = 'low';
+      const riskOrder = ['low','medium','high','critical'];
+      for (const slot of nvr.hdd_slots) {
+        const pred = predictHddFailure(slot);
+        slot.ai_risk       = pred.risk;
+        slot.ai_risk_score = pred.score;
+        slot.ai_risk_reason = pred.reason;
+        if (riskOrder.indexOf(pred.risk) > riskOrder.indexOf(worstRisk)) worstRisk = pred.risk;
+
+        // Raise NOC alert for high/critical risk
+        if (pred.risk === 'high' || pred.risk === 'critical') {
+          const existing = await NocAlert.exists({
+            description: { $regex: `${nvr.nvr_number}.*HDD.*Slot ${slot.slot}.*AI` },
+            resolved_at: null,
+          });
+          if (!existing) {
+            const alert = await NocAlert.create({
+              severity: pred.risk === 'critical' ? 'critical' : 'warning',
+              company:  nvr.company,
+              description: `🤖 AI: NVR ${nvr.nvr_number} HDD Slot ${slot.slot} — ${pred.risk.toUpperCase()} failure risk (score ${pred.score}/100). ${pred.reason}`,
+              source: 'ai-hdd-prediction',
+            });
+            io.emit('noc:alert', alert);
+          }
+        }
+      }
+      update.hdd_slots    = nvr.hdd_slots;
+      update.ai_hdd_risk  = worstRisk;
     }
   }
 

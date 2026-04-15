@@ -26,6 +26,7 @@ var CameraSchema = new mongoose.Schema({
   // not_started / in_progress / completed / faulty
   nvr_id:      { type: mongoose.Schema.Types.ObjectId, ref: 'nvrs' },
   nvr_channel: Number,
+  snapshot_url: String,          // last captured snapshot URL
   monitoring_enabled: { type: Boolean, default: true },
   rtsp_url:    String,
   created_at: Date,

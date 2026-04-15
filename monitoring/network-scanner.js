@@ -37,23 +37,28 @@ function checkPort(ip, port, timeoutMs = 1000) {
     });
 }
 
-// Scan one IP — check ports 554 (RTSP), 80 (HTTP), 8080 (alt HTTP)
+// Scan one IP — check all common NVR/camera ports
 async function scanIp(ip) {
-    const [rtsp, http, http8080] = await Promise.all([
-        checkPort(ip, 554),
-        checkPort(ip, 80),
-        checkPort(ip, 8080),
+    const WEB_PORTS  = [80, 8080, 8000, 8888];
+    const RTSP_PORTS = [554, 8554];
+
+    const checks = await Promise.all([
+        ...WEB_PORTS.map(p  => checkPort(ip, p).then(ok => ok ? p : null)),
+        ...RTSP_PORTS.map(p => checkPort(ip, p).then(ok => ok ? p : null)),
     ]);
-    if (rtsp || http || http8080) {
-        return {
-            ip_address: ip,
-            rtsp_port:  rtsp  ? 554  : null,
-            http_port:  http  ? 80   : (http8080 ? 8080 : null),
-            rtsp_url:   rtsp  ? `rtsp://${ip}:554/stream` : null,
-            detected_at: new Date().toISOString(),
-        };
-    }
-    return null;
+
+    const openWeb  = checks.slice(0, WEB_PORTS.length).filter(Boolean);
+    const openRtsp = checks.slice(WEB_PORTS.length).filter(Boolean);
+
+    if (!openWeb.length && !openRtsp.length) return null;
+
+    return {
+        ip_address:  ip,
+        rtsp_port:   openRtsp[0] || null,
+        http_port:   openWeb[0]  || null,
+        rtsp_url:    openRtsp[0] ? `rtsp://${ip}:${openRtsp[0]}/stream` : null,
+        detected_at: new Date().toISOString(),
+    };
 }
 
 // Scan full subnet in batches of 20 concurrent

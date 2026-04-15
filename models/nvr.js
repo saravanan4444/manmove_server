@@ -41,6 +41,8 @@ const NvrSchema = new mongoose.Schema({
   ip_address:     String,
   mac_address:    String,
   location:       String,
+  latitude:       Number,
+  longitude:      Number,
   pole_id:        { type: mongoose.Schema.Types.ObjectId, ref: 'poles' },
 
   // Legacy single-disk fields (kept for backward compat)
@@ -62,6 +64,18 @@ const NvrSchema = new mongoose.Schema({
   last_seen:            Date,
   last_ping_ms:         Number,
   consecutive_failures: { type: Number, default: 0 },
+
+  // Global standard additions
+  uptime_pct:       { type: Number, default: null },   // rolling 30-day uptime %
+  firmware_version: String,
+  bandwidth_mbps:   { type: Number, default: 0 },      // last known Mbps
+  ai_hdd_risk:      { type: String, enum: ['low','medium','high','critical'], default: 'low' },
+  service_logs: [{
+    date:       { type: Date, default: Date.now },
+    engineer:   String,
+    notes:      String,
+    _id: false,
+  }],
 
   installed_by:   String,
   installed_name: String,

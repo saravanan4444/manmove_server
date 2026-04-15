@@ -3,9 +3,11 @@ const CameraHealth = require('../models/camerahealth');
 const { pingHost } = require('./ping');
 const { checkRtsp } = require('./rtsp-check');
 const alertEngine  = require('./alert-engine');
+const { detectUptimeAnomaly } = require('./ai-engine');
 
 const cameraStatus  = new Map();
 const alertCooldown = new Map();
+const anomalyCache  = new Map(); // prevent repeat anomaly alerts
 const COOLDOWN_MS   = 30 * 60 * 1000;
 
 async function checkCamera(camera, io, alertFn) {
@@ -34,6 +36,30 @@ async function checkCamera(camera, io, alertFn) {
   cameraStatus.set(String(camera._id), { camera_id: camera._id, camera_number: camera.camera_number, ip_address: camera.ip_address, status, latency_ms: latency, rtsp_ok, checked_at: record.checked_at });
 
   alertEngine.processHealthUpdate(camera, status, latency, io).catch(() => {});
+
+  // ── AI: Anomaly detection (run every 10th check to avoid DB overload) ──
+  const checkCount = (anomalyCache.get('count_' + camera._id) || 0) + 1;
+  anomalyCache.set('count_' + camera._id, checkCount);
+  if (checkCount % 10 === 0) {
+    const since = new Date(Date.now() - 24 * 3600000);
+    const history = await CameraHealth.find({ camera_id: camera._id, checked_at: { $gte: since } })
+      .sort({ checked_at: 1 }).lean().catch(() => []);
+    const anomaly = detectUptimeAnomaly(history);
+    if (anomaly.anomaly) {
+      const lastAlert = anomalyCache.get('alert_' + camera._id) || 0;
+      if (Date.now() - lastAlert > 6 * 3600000) { // max 1 anomaly alert per 6h per camera
+        anomalyCache.set('alert_' + camera._id, Date.now());
+        const NocAlert = require('../models/nocAlert');
+        const alert = await NocAlert.create({
+          severity: anomaly.type === 'flapping' ? 'warning' : 'info',
+          company:  camera.company,
+          description: `🤖 AI Anomaly: ${camera.camera_number} — ${anomaly.pattern}`,
+          source: 'ai-anomaly-detection',
+        }).catch(() => null);
+        if (alert) io.emit('noc:alert', alert);
+      }
+    }
+  }
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }

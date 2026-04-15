@@ -164,6 +164,7 @@ const routeModules = [
     require('./routes/noc'),
     require('./routes/export'),
     require('./routes/fibercores'),
+    require('./routes/device-proxy'),
 ];
 
 for (const mod of routeModules) {
@@ -207,6 +208,18 @@ server.listen(PORT, () => {
     require('./monitoring/nvr-monitor').startNvrMonitoring(io);
     require('./noc/sla-rollup').startSlaScheduler();
     require('./noc/sla-escalation').startSlaEscalation(io);
+
+    // SLA breach check every 15 minutes
+    setInterval(async () => {
+        try {
+            const CameraMaintenance = require('./models/cameramaintenance');
+            const result = await CameraMaintenance.updateMany(
+                { sla_due_at: { $lt: new Date() }, sla_breached: false, status: { $nin: ['resolved','closed'] } },
+                { sla_breached: true }
+            );
+            if (result.modifiedCount > 0) io.emit('camera:sla_breached', { count: result.modifiedCount });
+        } catch (_) {}
+    }, 15 * 60 * 1000);
 
     // Keep Railway server warm — ping self every 10 minutes to prevent cold start
     const SERVER_URL = process.env.SERVER_URL || `http://localhost:${PORT}`;

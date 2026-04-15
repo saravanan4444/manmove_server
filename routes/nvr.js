@@ -36,6 +36,9 @@ router.get('/nvrs/dashboard/:projectId', ...mw, async (req, res) => {
       camera_count:    camCountMap[n._id.toString()]       || 0,
       completed_count: completedCountMap[n._id.toString()] || 0,
       fault_count:     faultCountMap[n._id.toString()]     || 0,
+      // Uptime: use stored value or derive from status
+      uptime_pct: n.uptime_pct != null ? n.uptime_pct
+        : (n.status === 'online' ? 100 : n.status === 'not_installed' ? null : 0),
     }));
 
     res.status(200).json({ status: 200, data: {
@@ -174,7 +177,130 @@ router.delete('/nvrs/:id/failover', ...mw, permitMatrix('projects', 'update'), a
   } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
 });
 
-// ── On-demand health check (manual trigger) ───────────────────────────────
+// ── Uptime % — computed from real status change history ──────────────────
+router.get('/nvrs/:id/uptime', ...mw, async (req, res) => {
+  try {
+    const nvr = await Nvr.findById(req.params.id, 'status last_seen nvr_number').lean();
+    if (!nvr) return res.status(200).json({ status: 404, message: 'NVR not found' });
+
+    const NvrStatusLog = require('../models/nvrstatuslog');
+    const since = new Date(Date.now() - 30 * 86400000);
+    const logs  = await NvrStatusLog.find({ nvr_id: req.params.id, changed_at: { $gte: since } })
+                                    .sort({ changed_at: 1 }).lean();
+
+    const windowMs = 30 * 86400000;
+    const now      = Date.now();
+    let onlineMs   = 0;
+
+    if (!logs.length) {
+      // No history — use current status as approximation
+      const uptime_pct = nvr.status === 'online' ? 100 : 0;
+      return res.status(200).json({ status: 200, data: { uptime_pct, source: 'estimated' } });
+    }
+
+    // Walk through log pairs to sum online durations
+    for (let i = 0; i < logs.length; i++) {
+      if (logs[i].status === 'online') {
+        const start = Math.max(logs[i].changed_at.getTime(), since.getTime());
+        const end   = logs[i + 1] ? logs[i + 1].changed_at.getTime() : now;
+        onlineMs += Math.max(0, end - start);
+      }
+    }
+    // If currently online and last log is online, count up to now (already handled above)
+
+    const uptime_pct = Math.round((onlineMs / windowMs) * 1000) / 10; // 1 decimal
+    // Persist computed value back to NVR
+    await Nvr.findByIdAndUpdate(req.params.id, { uptime_pct });
+    res.status(200).json({ status: 200, data: { uptime_pct, source: 'computed' } });
+  } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+});
+
+// ── CSV Export — all NVRs with health summary ─────────────────────────────
+router.get('/nvrs/export/csv', ...mw, async (req, res) => {
+  try {
+    const { project_id } = req.query;
+    const filter = {};
+    if (project_id) filter.project_id = project_id;
+    const nvrs = await Nvr.find(filter).lean();
+
+    const cols = ['nvr_number','brand','model','ip_address','location','status','uptime_pct',
+                  'channels','hdd_capacity_tb','hdd_used_tb','recording_mode','retention_days',
+                  'firmware_version','bandwidth_mbps','last_seen'];
+    const header = cols.join(',');
+    const rows = nvrs.map(n =>
+      cols.map(c => {
+        const v = n[c];
+        if (v == null) return '';
+        if (v instanceof Date) return v.toISOString();
+        return String(v).includes(',') ? `"${v}"` : v;
+      }).join(',')
+    );
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="nvr-report-${Date.now()}.csv"`);
+    res.send([header, ...rows].join('\n'));
+  } catch (err) { res.status(500).send('Export failed'); }
+});
+
+// ── Service log — add entry ───────────────────────────────────────────────
+router.post('/nvrs/:id/servicelog', ...mw, permitMatrix('projects', 'update'), async (req, res) => {
+  try {
+    const { engineer, notes } = req.body;
+    const data = await Nvr.findByIdAndUpdate(
+      req.params.id,
+      { $push: { service_logs: { date: new Date(), engineer, notes } } },
+      { new: true, select: 'service_logs nvr_number' }
+    );
+    res.status(200).json({ status: 200, data: data.service_logs });
+  } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+});
+
+// ── Bandwidth + firmware update ───────────────────────────────────────────
+router.put('/nvrs/:id/telemetry', ...mw, permitMatrix('projects', 'update'), async (req, res) => {
+  try {
+    const { bandwidth_mbps, firmware_version } = req.body;
+    const update = { updated_at: new Date() };
+    if (bandwidth_mbps  != null) update.bandwidth_mbps  = bandwidth_mbps;
+    if (firmware_version != null) update.firmware_version = firmware_version;
+    const data = await Nvr.findByIdAndUpdate(req.params.id, update, { new: true });
+    res.status(200).json({ status: 200, data });
+  } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+});
+
+// ── Camera snapshot URL update ────────────────────────────────────────────
+router.put('/nvrs/:nvrId/cameras/:camId/snapshot', ...mw, async (req, res) => {
+  try {
+    const { snapshot_url } = req.body;
+    await Camera.findByIdAndUpdate(req.params.camId, { snapshot_url });
+    res.status(200).json({ status: 200 });
+  } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+});
+
+// ── Network scan — discover unregistered NVRs/cameras on subnet ──────────
+router.get('/nvrs/scan', ...mw, async (req, res) => {
+  try {
+    const { subnet } = req.query;
+    if (!subnet) return res.status(200).json({ status: 400, message: 'subnet required e.g. 192.168.1' });
+
+    const { scanSubnet } = require('../monitoring/network-scanner');
+    const raw = await scanSubnet(subnet);
+
+    // Cross-reference with registered NVRs so UI can flag unregistered ones
+    const registered = await require('../models/nvr').find({}, 'ip_address').lean();
+    const registeredIps = new Set(registered.map(n => n.ip_address));
+
+    const data = raw.map(d => ({
+      ip:          d.ip_address,
+      type:        d.rtsp_port ? (d.http_port ? 'NVR/Camera' : 'Camera (RTSP only)') : 'HTTP Device',
+      ports:       [d.rtsp_port, d.http_port].filter(Boolean),
+      webPort:     d.http_port || 80,
+      rtsp_port:   d.rtsp_port,
+      registered:  registeredIps.has(d.ip_address),
+    }));
+
+    res.status(200).json({ status: 200, data });
+  } catch (err) { res.status(200).json({ status: 500, message: err.message }); }
+});
 router.get('/nvrs/:id/health', ...mw, async (req, res) => {
   try {
     const nvr = await Nvr.findById(req.params.id).lean();
