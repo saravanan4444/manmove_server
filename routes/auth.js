@@ -12,7 +12,7 @@ const { log } = require('../config/auditLog');
 const permissionCache = require('../config/permissionCache');
 const { recordLogin, recordLogout } = require('../config/sessionTracker');
 
-const SALT_ROUNDS = 12;
+const SALT_ROUNDS = 10;
 
 const loginSchema = Joi.object({
     username: Joi.string().required(),
